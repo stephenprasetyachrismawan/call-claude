@@ -92,7 +92,8 @@ export class GeminiAcp {
       clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
       clientInfo: { name: 'call-claude', version: '1.0.0' },
     }, 60_000);
-    await this.#request('authenticate', { methodId: LOGIN_WITH_GOOGLE }, 60_000);
+    // The first time this opens a Google sign-in page in the browser: allow time for it.
+    await this.#request('authenticate', { methodId: LOGIN_WITH_GOOGLE }, 5 * 60_000);
     await this.#newSession();
     console.log('[gemini] Speech-to-text lewat Gemini CLI siap.');
   }
