@@ -24,16 +24,25 @@ export class GuestChat {
     this.handlers = handlers; // onText(text, speakers), onError(message)
     this.queue = null;
     this.q = null;
-    this.speakers = []; // names waiting for an answer, in order
+    this.waiting = []; // { text, name } not yet sent
+    this.current = null; // name of the guest whose message is being answered
   }
 
   get busy() {
-    return this.speakers.length > 0;
+    return Boolean(this.current) || this.waiting.length > 0;
   }
 
+  /** Messages are sent one at a time so each answer goes to the right person. */
   send(text, name) {
+    this.waiting.push({ text, name });
+    this.#next();
+  }
+
+  #next() {
+    if (this.current || !this.waiting.length) return;
     if (!this.q) this.#start();
-    this.speakers.push(name);
+    const { text, name } = this.waiting.shift();
+    this.current = name;
     this.queue.push({
       type: 'user',
       message: { role: 'user', content: `[${name}]: ${text}` },
@@ -46,7 +55,8 @@ export class GuestChat {
     this.abort?.abort();
     this.queue = null;
     this.q = null;
-    this.speakers = [];
+    this.waiting = [];
+    this.current = null;
   }
 
   #start() {
@@ -92,9 +102,11 @@ export class GuestChat {
       for await (const msg of q) {
         if (q !== this.q) break;
         if (msg.type !== 'result') continue;
-        const name = this.speakers.shift() ?? '';
+        const name = this.current ?? '';
+        this.current = null;
         if (msg.subtype === 'success' && !msg.is_error) this.handlers.onText(msg.result || '...', name);
         else this.handlers.onError('Maaf, saya sedang tidak bisa menjawab.', name);
+        this.#next();
       }
     } catch (err) {
       if (q === this.q) {
