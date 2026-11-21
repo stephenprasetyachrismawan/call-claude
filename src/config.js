@@ -64,6 +64,8 @@ export const config = {
   geminiAudio: ['off', 'embedded'].includes(optional('GEMINI_AUDIO', 'auto')) ? optional('GEMINI_AUDIO', 'auto') : 'auto',
   geminiModel: optional('GEMINI_MODEL', ''),
   geminiTimeoutS: int('GEMINI_TIMEOUT_S', 25),
+  // Quiet seconds before Gemini gives a progress update on running work (0 = off).
+  idleProgressS: int('IDLE_PROGRESS_S', 10),
   sttLanguage: optional('STT_LANGUAGE', 'id'),
   sttModel: sttModel(),
   sttDtype: optional('STT_DTYPE', 'q8'),

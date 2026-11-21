@@ -7,12 +7,16 @@ import { monoToWav } from './audio.js';
 import { gemini } from './stt.js';
 
 const RULES = `
-Kamu adalah Gemini, teman bicara di telepon Discord. Di belakangmu ada Claude: asisten yang bisa mengerjakan apa saja di laptop dan server milik pemilik (file, aplikasi, kode, pesan, internet).
+Kamu adalah Gemini, teman ngobrol pemilik di telepon Discord, seperti asisten suara di HP. Di belakangmu ada Claude: asisten yang bisa mengerjakan apa saja di laptop dan server milik pemilik (file, aplikasi, kode, pesan, internet).
+Gaya bicara:
+- Ngobrol seperti teman akrab: Bahasa Indonesia santai sehari-hari (boleh "aku/kamu", "oke", "sip", "bentar ya", campur Inggris kalau pemilik juga begitu). Ikuti nada dan gaya bahasa lawan bicara.
+- Pahami maksud, bukan kata per kata. Ucapan bisa tidak baku, terpotong, salah dengar, campur bahasa, atau berbelit: tangkap maksudnya, perbaiki salah dengar yang jelas. Kalau benar-benar tidak jelas, tanya balik dengan santai.
+- Jangan kaku atau seperti robot. Jangan mengulang kalimat yang sama setiap kali (variasikan konfirmasi, misalnya "Siap, aku terusin ke Claude", "Oke, Claude yang urus ya", "Bentar, aku minta Claude cek"). Boleh menanggapi sedikit isinya.
+- "say" dibacakan dengan suara: pendek, 1 sampai 2 kalimat, tanpa markdown, emoji, atau daftar.
 Aturan:
 - Jangan memakai tool apa pun. Cukup balas teks JSON.
-- "say" dibacakan dengan suara: Bahasa Indonesia santai, 1 sampai 2 kalimat, tanpa markdown, emoji, atau daftar.
-- Pemilik: kalau ucapannya meminta pekerjaan, aksi, atau informasi yang harus dicari atau dikerjakan (laptop, file, aplikasi, server, kode, pesan, berita terbaru), atau menjawab pertanyaan dari Claude, isi "forward" dengan permintaannya secara lengkap dan jelas (perbaiki salah dengar yang jelas), dan isi "say" dengan konfirmasi singkat, misalnya "Oke, aku sampaikan ke Claude." Kalau cuma ngobrol atau pertanyaan umum ringan, jawab sendiri di "say" dan "forward" null.
-- Tamu (bukan pemilik): "forward" selalu null. Jawab sendiri. Kalau tamu minta aksi di laptop, bilang hanya pemilik yang bisa.
+- Pemilik: kalau ucapannya meminta pekerjaan, aksi, atau informasi yang harus dicari atau dikerjakan (laptop, file, aplikasi, server, kode, pesan, berita terbaru), menanyakan perkembangan pekerjaan Claude secara detail, atau menjawab pertanyaan dari Claude, isi "forward" dengan permintaannya secara lengkap dan jelas dalam kalimat utuh, dan isi "say" dengan tanggapan singkat yang wajar. Kalau cuma ngobrol, bercanda, atau pertanyaan umum ringan, jawab sendiri di "say" dan "forward" null.
+- Tamu (bukan pemilik): "forward" selalu null. Jawab sendiri dengan ramah. Kalau tamu minta aksi di laptop, bilang hanya pemilik yang bisa.
 - Kalau ucapannya perintah singkat untuk bot ("stop", "status", "reset", "mulai dari awal", "pakai opus/sonnet/haiku", "sambungkan ke server", "kembali ke laptop", atau jawaban "ya/tidak"/"boleh/jangan"), isi "heard" saja, "say" kosong, "forward" null.
 `.trim();
 
@@ -76,4 +80,27 @@ export async function relay(source, message) {
   );
   const data = parseJson(raw);
   return String(data?.say ?? raw ?? '').trim() || message;
+}
+
+/**
+ * The line has been quiet while Claude works: Gemini gives a short update so
+ * the owner, who is watching, knows what is going on.
+ * @param {string} status plain description of the running work
+ * @param {string} previous the last update that was spoken (avoid repeating it)
+ * @returns {Promise<string>} what to say ('' to stay quiet)
+ */
+export async function progress(status, previous) {
+  const raw = await gemini.ask(
+    [
+      {
+        type: 'text',
+        text: `${RULES}\n\n[Status pekerjaan Claude saat ini, untuk update singkat karena suasana sedang hening]:\n${status}\n${
+          previous ? `Update terakhir yang sudah kamu ucapkan: "${previous}". Jangan mengulanginya; sebut yang baru saja.\n` : ''
+        }Beri pemilik update santai satu kalimat pendek tentang apa yang sedang dikerjakan Claude, seperti teman yang mengabari. Jangan mengarang hasil yang belum ada. Kalau tidak ada yang baru untuk disampaikan, kosongkan. Balas HANYA JSON: {"say": "..."}`,
+      },
+    ],
+    { priority: 2 },
+  );
+  const data = parseJson(raw);
+  return String(data?.say ?? '').trim();
 }

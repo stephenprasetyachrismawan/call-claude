@@ -56,11 +56,13 @@ export class VoiceLink extends EventEmitter {
     this.holdLow = null; // () => boolean, set by the assistant
     this.pendingSpeech = 0; // queued or playing answers
     this.speechEndedAt = 0;
+    this.lastHeardAt = 0; // when someone last started or stopped talking
     this.closed = false;
     this.epoch = 0; // bumped by "hey Claude": drops everything queued before it
   }
 
   async join() {
+    this.joinedAt = Date.now();
     this.connection = joinVoiceChannel({
       channelId: this.channel.id,
       guildId: this.channel.guild.id,
@@ -103,6 +105,12 @@ export class VoiceLink extends EventEmitter {
       // already destroyed
     }
     this.connection = null;
+  }
+
+  /** Milliseconds since anyone (bot or people) last made a sound, 0 if busy now. */
+  get quietMs() {
+    if (this.speaking || this.recording.size > 0 || this.items.length > 0) return 0;
+    return Date.now() - Math.max(this.speechEndedAt, this.lastHeardAt, this.joinedAt ?? 0);
   }
 
   /** True while the bot is (about to be) talking, plus a short tail. */
@@ -218,6 +226,7 @@ export class VoiceLink extends EventEmitter {
     // While speaking, only listen for the wake word (short clips).
     const wakeOnly = this.speaking;
     this.recording.add(userId);
+    this.lastHeardAt = Date.now();
 
     const opus = this.connection.receiver.subscribe(userId, {
       end: { behavior: EndBehaviorType.AfterSilence, duration: wakeOnly ? WAKE_SILENCE_MS : config.silenceMs },
@@ -230,6 +239,7 @@ export class VoiceLink extends EventEmitter {
     const finish = () => {
       if (!this.recording.has(userId)) return;
       this.recording.delete(userId);
+      this.lastHeardAt = Date.now();
       const pcm = Buffer.concat(chunks);
       this.#handleAudio(pcm, wakeOnly, userId).catch((err) => {
         console.error('[voice] STT error:', err.message);
