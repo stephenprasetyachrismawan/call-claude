@@ -21,7 +21,9 @@ HP (Discord)  ◀──suara──  Edge TTS (text-to-speech, suara Indonesia)
 - Claude bisa menghubungi sesi Claude kamu yang lain (sesi lain di laptop, atau komputer/server yang menjalankan `claude rc`) lewat tool `ListAgents` dan `SendMessage`.
 - **Kerja paralel per topik:** "kepala" (model cepat) memilah tiap ucapan: lanjutan topik yang ada, atau topik baru. Topik baru dikerjakan oleh sesi Claude terpisah yang jalan bersamaan, jadi pertanyaan baru tidak menunggu pekerjaan lain. Begitu satu topik selesai, jawabannya langsung dibacakan dengan awalan "Soal <topik>". Ucapkan "status" untuk mendengar topik yang masih dikerjakan.
 - **Kontrol desktop yang dicek:** Claude membuka aplikasi lewat `scripts/open-app.ps1` (menunggu jendela muncul dan membawanya ke depan), lalu memastikan lewat screenshot (`scripts/screenshot.ps1`). Kalau belum tampil, Claude mengklik ikonnya di taskbar (`scripts/click.ps1`).
-- Saat bot sedang bicara, bot tidak mendengarkan, dan tidak ada yang bisa memotong bacaannya (kecuali menutup panggilan). Semua jawaban dibacakan sampai selesai, baru bot mendengarkan lagi.
+- Saat bot sedang bicara, suaramu tidak dijadikan perintah, jadi jawabannya dibacakan sampai selesai. Satu-satunya pengecualian: bilang **"hey Claude"**. Bot langsung berhenti bicara (antrean bacaan dibuang, teksnya tetap ada di chat) dan mendengarkanmu. Kalimat setelah "hey Claude" langsung dianggap perintah, misalnya "hey Claude, berhenti dulu".
+- **Tutup panggilan = semua berhenti:** semua sesi Claude yang dibuat bot ditandai `ClaudeCall · <topik>`. Saat kamu keluar dari voice channel (setelah jeda 15 detik), bot mematikan semua sesi itu beserta proses latar belakangnya. Sesi Claude lain milikmu (misalnya di server) tidak disentuh.
+- **Skill `claude-call`** ([`plugin/skills/claude-call/SKILL.md`](plugin/skills/claude-call/SKILL.md)) dimuat di setiap sesi bot: gaya jawaban lisan, kerja kode diserahkan sepenuhnya tanpa izin, dan aksi seperti mengirim pesan, email, posting, atau mematikan laptop wajib kamu izinkan dulu. Izin ini ditegakkan oleh hook di bot (bukan hanya instruksi), juga di mode `bypass`: bot membacakan apa yang akan dikirim, lalu kamu jawab "ya" atau "tidak".
 - **Pilih model:** saat panggilan mulai, bot mengirim tombol Sonnet / Opus / Haiku ke chat (default Sonnet). Bisa juga lewat suara: "pakai Opus", "ganti ke Sonnet", "model Haiku". Model berlaku untuk semua topik, termasuk yang sedang berjalan.
 - **Bicara sendiri dari semua sesi:** selama panggilan, setiap kali sesi Claude mana pun selesai menjawab, bot langsung membacakannya tanpa menunggu kamu bicara: topik paralel bot, sesi Claude Code lain di laptop ("Dari sesi ..."), dan semua sesi Claude di server (`SERVER_SSH`).
 
@@ -70,6 +72,7 @@ Perintah suara khusus:
 
 | Ucapkan | Hasil |
 |---|---|
+| "hey Claude" (saat bot bicara) | Memotong bacaan, lalu bot mendengarkan |
 | "stop" / "berhenti" | Menghentikan semua pekerjaan Claude yang sedang berjalan (bacaan tetap diselesaikan) |
 | "pakai Opus" / "pakai Sonnet" / "pakai Haiku" | Ganti model Claude |
 | "status" / "lagi ngerjain apa" | Menyebutkan topik yang masih dikerjakan |

@@ -99,7 +99,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
 for (const signal of ['SIGINT', 'SIGTERM']) {
   process.on(signal, () => {
-    assistant.disconnect();
+    assistant.disconnect(); // also kills every ClaudeCall session
     client.destroy();
     process.exit(0);
   });

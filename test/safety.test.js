@@ -112,3 +112,29 @@ test('model commands', async () => {
   assert.equal(parseModelCommand('opus itu apa'), null);
   assert.equal(parseModelCommand('buka chrome'), null);
 });
+
+test('wake word', async () => {
+  const { parseWakeWord } = await import('../src/safety.js');
+  assert.deepEqual(parseWakeWord('Hey Claude.'), { rest: '' });
+  assert.deepEqual(parseWakeWord('hei klod, buka chrome'), { rest: 'buka chrome' });
+  assert.deepEqual(parseWakeWord('Hai cloud stop dulu'), { rest: 'stop dulu' });
+  assert.equal(parseWakeWord('buka claude code'), null);
+  assert.equal(parseWakeWord('terus hey claude'), null);
+});
+
+test('consent needed for sending, not for code', async () => {
+  const { needsConsent } = await import('../src/safety.js');
+  assert.ok(needsConsent('mcp__Gmail__send_message', { to: 'x' }));
+  assert.ok(needsConsent('mcp__slack__post_message', {}));
+  assert.equal(needsConsent('mcp__Gmail__search_threads', {}), null);
+  assert.equal(needsConsent('SendMessage', { to: 'server' }), null);
+  assert.ok(needsConsent('PowerShell', { command: 'powershell -File "C:\\x\\scripts\\type.ps1" -Keys "{ENTER}"', description: 'Kirim ke Budi: halo' }));
+  assert.equal(needsConsent('PowerShell', { command: 'powershell -File "C:\\x\\scripts\\type.ps1" -Text "halo"' }), null);
+  assert.ok(needsConsent('Bash', { command: 'curl -X POST https://api.x -d @a' }));
+  assert.ok(needsConsent('PowerShell', { command: 'Stop-Computer -Force' }));
+  for (const command of ['npm test', 'git commit -m x', 'git push origin main', 'Remove-Item build -Recurse', 'curl https://example.com']) {
+    assert.equal(needsConsent('Bash', { command }), null, command);
+  }
+  assert.equal(needsConsent('Write', { file_path: 'C:\\code\\a.js' }), null);
+  assert.equal(needsConsent('PowerShell', { command: 'Stop-Computer', description: 'Matikan laptop' }).summary, 'Matikan laptop');
+});

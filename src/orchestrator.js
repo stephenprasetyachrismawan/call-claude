@@ -79,7 +79,7 @@ export class Orchestrator {
       onError: (message) => this.handlers.onError(message, topic.label),
       onToolUse: (name, summary) => this.handlers.onToolUse?.(name, summary, topic.label),
       requestApproval: (req) => this.handlers.requestApproval(req),
-    }, this.model);
+    }, this.model, `ClaudeCall · ${label}`);
     this.topics.set(id, topic);
     return topic;
   }
@@ -105,7 +105,9 @@ export class Orchestrator {
     await Promise.all([...this.topics.values()].map((t) => t.session.interrupt()));
   }
 
+  /** Close every topic and stop the router: kills all ClaudeCall processes. */
   reset() {
     for (const t of [...this.topics.values()]) this.#closeTopic(t);
+    this.router.stop();
   }
 }

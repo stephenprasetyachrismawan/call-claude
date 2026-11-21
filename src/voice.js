@@ -16,6 +16,7 @@ import { config } from './config.js';
 import { pcmDurationSeconds, rms, toMono16k } from './audio.js';
 import { transcribe } from './stt.js';
 import { splitForSpeech, synthesize, toSpeakable } from './tts.js';
+import { parseWakeWord } from './safety.js';
 
 const MIN_UTTERANCE_S = 0.4;
 const MAX_UTTERANCE_S = 60;
@@ -23,14 +24,18 @@ const MIN_LOUDNESS = 0.004;
 // Quiet time after the last clip before listening again, so the end of our
 // own speech (or its echo on the phone) is never picked up as the owner.
 const LISTEN_AFTER_SPEECH_MS = 800;
+// While the bot speaks, the owner's voice is only checked for "hey Claude".
+const WAKE_MAX_S = 6;
+const WAKE_SILENCE_MS = 600;
 
 /**
  * Voice connection to one channel. Listens only to the owner and emits
  * 'utterance' with the transcribed text. speak() reads text aloud.
- * Speech is strict: every queued answer is read to the end, in order, and
- * nothing (the owner's voice, a new answer, a "stop") cuts it off. While
- * anything is queued or playing the bot does not listen; listening resumes
- * only after the whole queue has finished.
+ * Speech is strict: every queued answer is read to the end, in order. While
+ * the bot speaks, the owner's voice is not taken as input, it is only checked
+ * for the wake word "hey Claude": that stops all speech right away (emits
+ * 'wake') and the bot listens again. Without the wake word, the answer just
+ * keeps playing and what was said is dropped.
  */
 export class VoiceLink extends EventEmitter {
   constructor(channel) {
@@ -48,6 +53,7 @@ export class VoiceLink extends EventEmitter {
     this.pendingSpeech = 0; // queued or playing answers
     this.speechEndedAt = 0;
     this.closed = false;
+    this.epoch = 0; // bumped by "hey Claude": drops everything queued before it
   }
 
   async join() {
@@ -105,6 +111,7 @@ export class VoiceLink extends EventEmitter {
   speak(text) {
     const pieces = splitForSpeech(toSpeakable(text));
     if (!pieces.length || this.closed) return Promise.resolve();
+    const epoch = this.epoch;
     this.pendingSpeech += 1;
     this.speechChain = this.speechChain
       .then(async () => {
@@ -116,17 +123,25 @@ export class VoiceLink extends EventEmitter {
         };
         for (let i = 0; i < pieces.length; i++) {
           fetchUpTo(i + 1 + PREFETCH);
+          if (epoch !== this.epoch) return;
           const audio = await clips[i];
-          if (this.closed || !this.connection) return;
+          if (this.closed || !this.connection || epoch !== this.epoch) return;
           if (audio?.length) await this.#play(audio);
         }
       })
       .catch((err) => console.error('[voice] TTS error:', err.message))
       .finally(() => {
         this.pendingSpeech = Math.max(0, this.pendingSpeech - 1);
-        this.speechEndedAt = Date.now();
+        // After "hey Claude" listen right away; otherwise keep the short tail.
+        this.speechEndedAt = epoch === this.epoch ? Date.now() : 0;
       });
     return this.speechChain;
+  }
+
+  /** "Hey Claude": stop the current clip and drop everything queued. */
+  interruptSpeech() {
+    this.epoch += 1;
+    this.player.stop(true);
   }
 
   async #synth(text) {
@@ -166,23 +181,24 @@ export class VoiceLink extends EventEmitter {
 
   #listen() {
     if (this.recording || !this.connection) return;
-    // Don't listen while speaking: the whole answer is read first.
-    if (this.closed || this.speaking) return;
+    if (this.closed) return;
+    // While speaking, only listen for the wake word (short clips).
+    const wakeOnly = this.speaking;
     this.recording = true;
 
     const opus = this.connection.receiver.subscribe(config.ownerUserId, {
-      end: { behavior: EndBehaviorType.AfterSilence, duration: config.silenceMs },
+      end: { behavior: EndBehaviorType.AfterSilence, duration: wakeOnly ? WAKE_SILENCE_MS : config.silenceMs },
     });
     const decoder = new prism.opus.Decoder({ rate: 48000, channels: 2, frameSize: 960 });
     const chunks = [];
     let bytes = 0;
-    const maxBytes = MAX_UTTERANCE_S * 48000 * 2 * 2;
+    const maxBytes = (wakeOnly ? WAKE_MAX_S : MAX_UTTERANCE_S) * 48000 * 2 * 2;
 
     const finish = () => {
       if (!this.recording) return;
       this.recording = false;
       const pcm = Buffer.concat(chunks);
-      this.#handleAudio(pcm).catch((err) => {
+      this.#handleAudio(pcm, wakeOnly).catch((err) => {
         console.error('[voice] STT error:', err.message);
         this.emit('stt-error', err);
       });
@@ -200,11 +216,25 @@ export class VoiceLink extends EventEmitter {
     opus.pipe(decoder);
   }
 
-  async #handleAudio(pcm) {
+  async #handleAudio(pcm, wakeOnly) {
     if (pcmDurationSeconds(pcm) < MIN_UTTERANCE_S) return;
     const mono = toMono16k(pcm);
     if (rms(mono) < MIN_LOUDNESS) return;
     const text = await transcribe(mono);
-    if (text) this.emit('utterance', text);
+    if (!text) return;
+    const wake = parseWakeWord(text);
+    if (wakeOnly) {
+      if (!wake) return; // no "hey Claude": let the bot keep talking
+      console.log('[voice] Wake word, bacaan dihentikan');
+      this.interruptSpeech();
+      this.emit('wake');
+      if (wake.rest) this.emit('utterance', wake.rest);
+      return;
+    }
+    if (wake) {
+      if (wake.rest) this.emit('utterance', wake.rest);
+      return; // a bare "hey Claude" when nothing is playing needs no answer
+    }
+    this.emit('utterance', text);
   }
 }
