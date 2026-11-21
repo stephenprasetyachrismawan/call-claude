@@ -70,18 +70,22 @@ export class GeminiAcp {
     fs.mkdirSync(this.cwd, { recursive: true });
     const args = ['--acp', '--approval-mode', 'plan'];
     if (config.geminiModel) args.push('-m', config.geminiModel);
-    const child = spawn(config.geminiCli, args, {
-      cwd: this.cwd,
-      stdio: ['pipe', 'pipe', 'pipe'],
-      windowsHide: true,
-      shell: process.platform === 'win32', // gemini is a .cmd shim on Windows
-    });
+    const options = { cwd: this.cwd, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true };
+    // On Windows gemini is a .cmd shim, which needs a shell; quote the path
+    // (it may contain spaces). The arguments are fixed flags and a model name.
+    const child =
+      process.platform === 'win32'
+        ? spawn(`"${config.geminiCli}" ${args.map((a) => `"${a}"`).join(' ')}`, { ...options, shell: true })
+        : spawn(config.geminiCli, args, options);
     this.child = child;
-    child.stderr.on('data', () => {});
+    let stderr = '';
+    child.stderr.on('data', (d) => {
+      stderr = (stderr + d).slice(-2000);
+    });
     child.on('error', (err) => console.error('[gemini] gagal start:', err.message));
     child.on('exit', (code) => {
       if (this.child === child) {
-        console.error(`[gemini] CLI berhenti (kode ${code})`);
+        console.error(`[gemini] CLI berhenti (kode ${code}) ${stderr.trim().split('\n').slice(-3).join(' | ')}`);
         this.stop();
       }
     });
