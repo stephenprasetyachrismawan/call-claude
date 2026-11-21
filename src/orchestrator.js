@@ -17,6 +17,7 @@ export class Orchestrator {
   constructor(handlers) {
     this.handlers = handlers;
     this.router = new Router();
+    this.router.warm();
     this.topics = new Map(); // id -> { id, label, session, lastQuestion, lastAnswer, lastUsed }
     this.nextId = 1;
     this.routing = Promise.resolve(); // keep utterances in order

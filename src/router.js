@@ -36,6 +36,7 @@ export class Router {
         env: claudeEnv(),
         settingSources: [],
         tools: [],
+        effort: 'low',
         systemPrompt: ROUTER_PROMPT,
         permissionMode: 'default',
       },
@@ -52,6 +53,11 @@ export class Router {
       if (this.q === q) this.q = null;
       for (const w of this.waiters.splice(0)) w('');
     })();
+  }
+
+  /** Start the router process ahead of time so the first routing is fast. */
+  warm() {
+    if (!this.q) this.#start();
   }
 
   #restart() {
