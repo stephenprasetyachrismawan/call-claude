@@ -12,7 +12,7 @@ import {
 } from '@discordjs/voice';
 import prism from 'prism-media';
 import { config } from './config.js';
-import { pcmDurationSeconds, rms, toMono16k, wavFromPcm } from './audio.js';
+import { pcmDurationSeconds, rms, toMono16k } from './audio.js';
 import { transcribe } from './stt.js';
 import { synthesize, toSpeakable } from './tts.js';
 
@@ -143,7 +143,7 @@ export class VoiceLink extends EventEmitter {
     if (pcmDurationSeconds(pcm) < MIN_UTTERANCE_S) return;
     const mono = toMono16k(pcm);
     if (rms(mono) < MIN_LOUDNESS) return;
-    const text = await transcribe(wavFromPcm(mono));
+    const text = await transcribe(mono);
     if (text) this.emit('utterance', text);
   }
 }

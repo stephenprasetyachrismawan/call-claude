@@ -25,7 +25,6 @@ export const config = {
   discordToken: required('DISCORD_TOKEN'),
   ownerUserId: required('OWNER_USER_ID'),
   guildId: required('GUILD_ID'),
-  groqApiKey: required('GROQ_API_KEY'),
 
   textChannelId: optional('TEXT_CHANNEL_ID', ''),
 
@@ -34,7 +33,8 @@ export const config = {
   claudeOAuthToken: optional('CLAUDE_CODE_OAUTH_TOKEN', ''),
 
   sttLanguage: optional('STT_LANGUAGE', 'id'),
-  sttModel: optional('STT_MODEL', 'whisper-large-v3-turbo'),
+  sttModel: optional('STT_MODEL', 'onnx-community/whisper-small'),
+  sttDtype: optional('STT_DTYPE', 'q8'),
   ttsVoice: optional('TTS_VOICE', 'id-ID-GadisNeural'),
   ttsRate: optional('TTS_RATE', '+10%'),
 

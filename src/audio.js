@@ -1,5 +1,5 @@
-// Helpers to turn Discord's decoded PCM (48 kHz, stereo, s16le) into a small
-// mono 16 kHz WAV that Whisper accepts.
+// Helpers to turn Discord's decoded PCM (48 kHz, stereo, s16le) into the
+// mono 16 kHz audio Whisper expects.
 
 export const DISCORD_RATE = 48000;
 export const DISCORD_CHANNELS = 2;
@@ -42,23 +42,4 @@ export function rms(mono) {
     acc += s * s;
   }
   return Math.sqrt(acc / n);
-}
-
-/** Wrap mono s16le PCM in a WAV header. */
-export function wavFromPcm(mono, sampleRate = TARGET_RATE) {
-  const header = Buffer.alloc(44);
-  header.write('RIFF', 0);
-  header.writeUInt32LE(36 + mono.length, 4);
-  header.write('WAVE', 8);
-  header.write('fmt ', 12);
-  header.writeUInt32LE(16, 16); // PCM chunk size
-  header.writeUInt16LE(1, 20); // PCM format
-  header.writeUInt16LE(1, 22); // channels
-  header.writeUInt32LE(sampleRate, 24);
-  header.writeUInt32LE(sampleRate * 2, 28); // byte rate
-  header.writeUInt16LE(2, 32); // block align
-  header.writeUInt16LE(16, 34); // bits per sample
-  header.write('data', 36);
-  header.writeUInt32LE(mono.length, 40);
-  return Buffer.concat([header, mono]);
 }

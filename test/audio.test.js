@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import prism from 'prism-media';
-import { pcmDurationSeconds, rms, toMono16k, wavFromPcm } from '../src/audio.js';
+import { pcmDurationSeconds, rms, toMono16k } from '../src/audio.js';
 
 function sineStereo48k(seconds, freq = 440, amp = 0.3) {
   const frames = Math.round(48000 * seconds);
@@ -14,16 +14,12 @@ function sineStereo48k(seconds, freq = 440, amp = 0.3) {
   return buf;
 }
 
-test('PCM conversion produces a valid 16 kHz mono WAV', () => {
+test('PCM conversion produces 16 kHz mono audio', () => {
   const pcm = sineStereo48k(1);
   assert.equal(pcmDurationSeconds(pcm), 1);
   const mono = toMono16k(pcm);
   assert.equal(mono.length, 16000 * 2);
   assert.ok(rms(mono) > 0.15 && rms(mono) < 0.25);
-  const wav = wavFromPcm(mono);
-  assert.equal(wav.toString('ascii', 0, 4), 'RIFF');
-  assert.equal(wav.readUInt32LE(24), 16000);
-  assert.equal(wav.length, 44 + mono.length);
 });
 
 test('silence has near-zero loudness', () => {
@@ -42,4 +38,16 @@ test('opus decoder used for Discord audio round-trips', async () => {
   const pcm = Buffer.concat(out);
   assert.ok(pcmDurationSeconds(pcm) > 0.4);
   assert.ok(rms(toMono16k(pcm)) > 0.1);
+});
+
+test('int16ToFloat32 scales samples to -1..1', async () => {
+  process.env.DISCORD_TOKEN ||= 'x';
+  process.env.OWNER_USER_ID ||= '1';
+  process.env.GUILD_ID ||= '1';
+  const { int16ToFloat32 } = await import('../src/stt.js');
+  const buf = Buffer.alloc(6);
+  buf.writeInt16LE(-32768, 0);
+  buf.writeInt16LE(0, 2);
+  buf.writeInt16LE(16384, 4);
+  assert.deepEqual(Array.from(int16ToFloat32(buf)), [-1, 0, 0.5]);
 });

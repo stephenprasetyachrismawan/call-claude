@@ -3,7 +3,7 @@
 Telepon Claude dari HP lewat voice channel Discord, lalu suruh Claude mengerjakan sesuatu di laptop Windows kamu.
 
 ```
-HP (Discord)  ──suara──▶  Bot di laptop  ──▶  Groq Whisper (speech-to-text)
+HP (Discord)  ──suara──▶  Bot di laptop  ──▶  Whisper lokal di laptop (speech-to-text)
                                    │
                                    ▼
                      Claude Agent SDK (mesin Claude Code,
@@ -37,7 +37,6 @@ HP (Discord)  ◀──suara──  Edge TTS (text-to-speech, suara Indonesia)
       ```
       (izin: View Channels, Send Messages, Read Message History, Connect, Speak, Use Voice Activity)
    4. Di aplikasi Discord, aktifkan **Settings → Advanced → Developer Mode**. Klik kanan server lalu pilih **Copy Server ID** untuk `GUILD_ID`. Klik kanan namamu lalu pilih **Copy User ID** untuk `OWNER_USER_ID`.
-4. **API key Groq** (gratis untuk pemakaian ringan): https://console.groq.com/keys, isi ke `GROQ_API_KEY`.
 
 ## Instalasi
 
@@ -50,7 +49,9 @@ notepad .env      # isi semua variabel yang wajib
 npm start
 ```
 
-Kalau berhasil, akan muncul `[bot] Login sebagai ...`.
+Kalau berhasil, akan muncul `[bot] Login sebagai ...` dan `[stt] Model siap ...`.
+
+Speech-to-text berjalan **di laptop sendiri** (Whisper lewat transformers.js), jadi tidak perlu API key dan suaramu tidak dikirim ke layanan lain. Saat pertama kali dijalankan, model Whisper (sekitar 250 MB untuk `whisper-small`) diunduh sekali ke folder `models/`.
 
 ## Cara pakai dari HP
 
@@ -106,6 +107,7 @@ Pemakaian lewat bot ini mengambil jatah langganan Claude yang sama dengan Claude
 | `WORKSPACE_DIR` | `~/claude-workspace` | Folder kerja Claude |
 | `TEXT_CHANNEL_ID` | chat di voice channel | Channel untuk transkrip dan tombol izin |
 | `STT_LANGUAGE` | `id` | Bahasa yang kamu ucapkan |
+| `STT_MODEL` | `onnx-community/whisper-small` | Model Whisper lokal. `onnx-community/whisper-large-v3-turbo` lebih akurat tapi lebih lambat dan unduhannya sekitar 1 GB |
 | `TTS_VOICE` | `id-ID-GadisNeural` | Suara pembaca (pria: `id-ID-ArdiNeural`) |
 | `TTS_RATE` | `+10%` | Kecepatan bicara |
 | `SILENCE_MS` | `1000` | Lama diam (ms) yang dianggap akhir kalimat |

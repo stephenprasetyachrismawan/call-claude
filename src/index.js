@@ -3,6 +3,7 @@ import { generateDependencyReport } from '@discordjs/voice';
 import fs from 'node:fs';
 import { config } from './config.js';
 import { Assistant } from './assistant.js';
+import { initStt } from './stt.js';
 
 fs.mkdirSync(config.workspaceDir, { recursive: true });
 
@@ -16,6 +17,9 @@ const client = new Client({
 });
 
 const assistant = new Assistant(client);
+
+// Start loading Whisper right away so it is ready by the first call.
+initStt().catch((err) => console.error('[stt] Gagal memuat model:', err.message));
 const isOwner = (userId) => userId === config.ownerUserId;
 
 client.once(Events.ClientReady, async (c) => {
