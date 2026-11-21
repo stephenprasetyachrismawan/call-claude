@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import { config } from './config.js';
 import { assessRisk } from './safety.js';
@@ -96,6 +97,8 @@ export class ClaudeSession {
   }
 
   #start() {
+    // Spawning Claude Code in a missing folder fails with a confusing error.
+    fs.mkdirSync(config.workspaceDir, { recursive: true });
     this.queue = new AsyncQueue();
     this.abort = new AbortController();
     const q = query({
