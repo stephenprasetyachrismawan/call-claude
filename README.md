@@ -16,7 +16,10 @@ HP (Discord)  ◀──suara──  Edge TTS (text-to-speech, suara Indonesia)
 - Bot otomatis masuk ke voice channel saat kamu masuk, dan keluar saat kamu keluar.
 - Bot **hanya** mendengar dan menjawab user ID Discord kamu (`OWNER_USER_ID`). Orang lain di channel diabaikan, dan tombol izin hanya bisa ditekan olehmu.
 - Transkrip, jawaban lengkap, dan tool yang dipakai Claude juga dikirim sebagai teks ke channel chat. Kamu juga bisa mengetik perintah di sana kalau sedang tidak bisa bicara.
-- Claude bebas membaca dan menjalankan perintah biasa. **Aksi berisiko harus kamu izinkan dulu**, baik dengan menjawab "ya" atau "tidak" lewat suara maupun dengan menekan tombol di chat. Kalau dalam 60 detik tidak dijawab, aksinya otomatis ditolak.
+- Secara default (`PERMISSION_MODE=bypass`) Claude menjalankan **semua** perintah di folder mana pun tanpa bertanya. Kalau mau aksi berisiko diizinkan dulu (lewat suara "ya"/"tidak" atau tombol di chat), isi `PERMISSION_MODE=confirm`.
+- Claude memakai setup Claude Code kamu: skill, plugin, MCP server, `CLAUDE.md`, dan pengaturan di `~/.claude`.
+- Claude bisa menghubungi sesi Claude kamu yang lain (sesi lain di laptop, atau komputer/server yang menjalankan `claude rc`) lewat tool `ListAgents` dan `SendMessage`.
+- Saat bot sedang bicara, bot tidak mendengarkan, jadi jawabannya tidak terpotong oleh suaramu. Bot mendengarkan lagi setelah selesai bicara.
 
 ## Yang perlu disiapkan
 
@@ -63,22 +66,22 @@ Perintah suara khusus:
 
 | Ucapkan | Hasil |
 |---|---|
-| "stop" / "berhenti" | Menghentikan pekerjaan Claude yang sedang berjalan, atau memotong bacaan |
+| "stop" / "berhenti" | Menghentikan pekerjaan Claude yang sedang berjalan |
 | "mulai dari awal" / "reset" | Memulai percakapan baru (Claude lupa konteks sebelumnya) |
-| "ya" / "boleh" / "oke" | Mengizinkan aksi berisiko yang sedang ditanyakan |
-| "tidak" / "jangan" / "batal" | Menolak aksi berisiko |
-
-Bicara saat bot sedang membaca jawaban akan langsung memotong bacaannya.
+| "ya" / "boleh" / "oke" | Mengizinkan aksi berisiko (hanya di mode `confirm`) |
+| "tidak" / "jangan" / "batal" | Menolak aksi berisiko (hanya di mode `confirm`) |
 
 Tips: di Discord HP, gunakan mode **Voice Activity** (bukan Push to Talk) dan aktifkan **Noise Suppression** supaya suara lebih jelas.
 
 ## Aturan keamanan
 
-Pengecekan ada di [`src/safety.js`](src/safety.js) dan diuji di [`test/safety.test.js`](test/safety.test.js).
+**Mode `bypass` (default):** tidak ada pengecekan per perintah. Pengamannya adalah bot hanya melayani user ID-mu, dan Claude diminta mengulang dulu perintah yang tidak bisa dibatalkan kalau terdengar janggal. Karena speech-to-text bisa salah dengar, perintah yang salah dengar bisa langsung dijalankan.
+
+**Mode `confirm`:** pengecekan ada di [`src/safety.js`](src/safety.js) dan diuji di [`test/safety.test.js`](test/safety.test.js).
 
 - **Tanpa izin:** membaca file, mencari, web search, perintah shell yang hanya membaca (mis. `dir`, `Get-Process`, `git status`), dan menulis atau mengedit file **di dalam** `WORKSPACE_DIR`.
 - **Wajib izin:** menghapus, memindahkan, atau menimpa file; menulis file di luar `WORKSPACE_DIR`; shutdown/restart; mengubah registry, layanan, atau konfigurasi sistem; menghentikan program; menginstal atau menghapus software dan paket; `git push` / `reset --hard`; menjalankan skrip dari internet; menjalankan sebagai administrator; mengirim data keluar (POST, scp, email); dan semua tool lain yang tidak dikenal.
-- Pengaturan Claude Code milikmu (`~/.claude/settings.json`) **tidak** dimuat, supaya aturan allow di sana tidak bisa melewati pengecekan ini.
+- Aturan `allow` di pengaturan Claude Code milikmu (`~/.claude/settings.json`) tetap berlaku dan bisa melewati pengecekan ini.
 - Bot selalu menghapus `ANTHROPIC_API_KEY` dari environment Claude, jadi yang terpakai selalu langgananmu.
 - Token disimpan di `.env`, yang sudah ada di `.gitignore`. Jangan pernah commit file itu.
 
@@ -103,6 +106,8 @@ Pemakaian lewat bot ini mengambil jatah langganan Claude yang sama dengan Claude
 
 | Variabel | Default | Keterangan |
 |---|---|---|
+| `PERMISSION_MODE` | `bypass` | `bypass` = tanpa konfirmasi, `confirm` = aksi berisiko diizinkan dulu |
+| `REMOTE_CONTROL` | `true` | Nyalakan Remote Control untuk sesi bot, supaya bisa mengirim pesan ke sesi Claude lain |
 | `CLAUDE_MODEL` | `claude-opus-5-5` | Model Claude |
 | `WORKSPACE_DIR` | `~/claude-workspace` | Folder kerja Claude |
 | `TEXT_CHANNEL_ID` | chat di voice channel | Channel untuk transkrip dan tombol izin |

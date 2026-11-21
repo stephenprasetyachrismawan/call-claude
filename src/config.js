@@ -40,6 +40,9 @@ export const config = {
   claudeModel: optional('CLAUDE_MODEL', 'claude-opus-5-5'),
   workspaceDir: path.resolve(optional('WORKSPACE_DIR', path.join(os.homedir(), 'claude-workspace'))),
   claudeOAuthToken: optional('CLAUDE_CODE_OAUTH_TOKEN', ''),
+  // 'bypass' = Claude runs everything without asking; 'confirm' = risky actions need approval.
+  permissionMode: optional('PERMISSION_MODE', 'bypass') === 'confirm' ? 'confirm' : 'bypass',
+  remoteControl: optional('REMOTE_CONTROL', 'true') !== 'false',
 
   sttLanguage: optional('STT_LANGUAGE', 'id'),
   sttModel: sttModel(),

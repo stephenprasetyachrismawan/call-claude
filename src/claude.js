@@ -9,7 +9,12 @@ Kamu sedang ditelepon oleh pemilik laptop ini lewat voice channel Discord dari H
 - Jawabanmu akan dibacakan dengan text-to-speech. Jawab dalam Bahasa Indonesia yang santai dan singkat (1 sampai 3 kalimat, kecuali diminta detail). Jangan pakai markdown, tabel, daftar, atau blok kode. Sampaikan hasilnya, bukan langkah-langkahnya.
 - Laptop ini memakai Windows. Untuk urusan sistem, pakai PowerShell (misalnya: powershell -NoProfile -Command "...").
 - Folder kerja default: ${config.workspaceDir}
-- Beberapa aksi berisiko (menghapus, menginstal, mematikan laptop, mengubah sistem, dll.) otomatis dimintakan persetujuan pemilik. Kalau aksi ditolak, jangan mencari cara lain untuk melakukan hal yang sama. Sampaikan saja bahwa aksinya dibatalkan.
+- Kamu boleh bekerja di folder mana pun di laptop ini.
+- Pakai skill yang tersedia (tool Skill) setiap kali ada skill yang cocok dengan permintaan.
+- Untuk menghubungi sesi Claude lain milik pemilik (sesi lain di laptop ini, atau sesi Remote Control di komputer/server lain), pakai tool ListAgents untuk melihat daftarnya dan SendMessage untuk mengirim pesan.
+${config.permissionMode === 'confirm'
+    ? '- Beberapa aksi berisiko otomatis dimintakan persetujuan pemilik. Kalau aksi ditolak, jangan mencari cara lain untuk melakukan hal yang sama.'
+    : '- Pemilik sudah mengizinkan semua aksi tanpa konfirmasi. Tetap hati-hati: untuk aksi yang tidak bisa dibatalkan (menghapus data penting, memformat disk, mematikan laptop) dan perintahnya terdengar janggal atau ambigu, ulangi dulu perintahnya dan tanyakan kepastian secara lisan.'}
 `.trim();
 
 /** Minimal async queue used as the streaming prompt for the Agent SDK. */
@@ -108,12 +113,20 @@ export class ClaudeSession {
         model: config.claudeModel,
         env: claudeEnv(),
         abortController: this.abort,
-        // Do not load the user's Claude Code settings: their allow rules would
-        // skip our approval check. Every non-read-only call goes through canUseTool.
-        settingSources: [],
-        permissionMode: 'default',
+        // Load the owner's Claude Code setup: user/project settings, CLAUDE.md,
+        // skills, plugins and MCP servers, just like running `claude` there.
+        settingSources: ['user', 'project', 'local'],
+        skills: 'all',
+        // Start Remote Control for this session so SendMessage can reach the
+        // owner's sessions on other machines (e.g. a server running `claude rc`).
+        settings: { remoteControlAtStartup: config.remoteControl },
         systemPrompt: { type: 'preset', preset: 'claude_code', append: VOICE_PROMPT },
-        canUseTool: (toolName, input, { signal }) => this.#canUseTool(toolName, input, signal),
+        ...(config.permissionMode === 'confirm'
+          ? {
+              permissionMode: 'default',
+              canUseTool: (toolName, input, { signal }) => this.#canUseTool(toolName, input, signal),
+            }
+          : { permissionMode: 'bypassPermissions', allowDangerouslySkipPermissions: true }),
       },
     });
     this.q = q;

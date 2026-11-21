@@ -23,6 +23,8 @@ const MIN_LOUDNESS = 0.004;
 /**
  * Voice connection to one channel. Listens only to the owner and emits
  * 'utterance' with the transcribed text. speak() reads text aloud.
+ * While the bot is speaking it does not listen, so the owner's voice never
+ * cuts an answer off; listening resumes once playback has finished.
  */
 export class VoiceLink extends EventEmitter {
   constructor(channel) {
@@ -34,6 +36,8 @@ export class VoiceLink extends EventEmitter {
     this.recording = false;
     this.speechChain = Promise.resolve();
     this.speechGeneration = 0;
+    this.pendingSpeech = 0; // queued or playing TTS clips
+
   }
 
   async join() {
@@ -75,7 +79,12 @@ export class VoiceLink extends EventEmitter {
     this.connection = null;
   }
 
-  /** Stop current and queued speech (used for barge-in). */
+  /** True while an answer is queued or being read aloud. */
+  get speaking() {
+    return this.pendingSpeech > 0 || this.player.state.status !== AudioPlayerStatus.Idle;
+  }
+
+  /** Stop current and queued speech. */
   stopSpeaking() {
     this.speechGeneration += 1;
     this.player.stop(true);
@@ -86,6 +95,7 @@ export class VoiceLink extends EventEmitter {
     const spoken = toSpeakable(text);
     if (!spoken) return Promise.resolve();
     const generation = this.speechGeneration;
+    this.pendingSpeech += 1;
     this.speechChain = this.speechChain
       .then(async () => {
         if (generation !== this.speechGeneration || !this.connection) return;
@@ -98,16 +108,18 @@ export class VoiceLink extends EventEmitter {
         await entersState(this.player, AudioPlayerStatus.Playing, 10_000).catch(() => {});
         await entersState(this.player, AudioPlayerStatus.Idle, 5 * 60_000).catch(() => {});
       })
-      .catch((err) => console.error('[voice] TTS error:', err.message));
+      .catch((err) => console.error('[voice] TTS error:', err.message))
+      .finally(() => {
+        this.pendingSpeech -= 1;
+      });
     return this.speechChain;
   }
 
   #listen() {
     if (this.recording || !this.connection) return;
+    // Don't listen while speaking: the owner's voice must not cut the answer off.
+    if (this.speaking) return;
     this.recording = true;
-
-    // Barge-in: if the owner starts talking, stop reading the previous answer.
-    if (this.player.state.status !== AudioPlayerStatus.Idle) this.stopSpeaking();
 
     const opus = this.connection.receiver.subscribe(config.ownerUserId, {
       end: { behavior: EndBehaviorType.AfterSilence, duration: config.silenceMs },
