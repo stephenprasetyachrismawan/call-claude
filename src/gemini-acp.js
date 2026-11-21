@@ -68,8 +68,11 @@ export class GeminiAcp {
 
   async #start() {
     fs.mkdirSync(this.cwd, { recursive: true });
-    const args = ['--acp', '--approval-mode', 'plan'];
-    if (config.geminiModel) args.push('-m', config.geminiModel);
+    // Antigravity CLI (agy, the Gemini CLI successor for personal accounts)
+    // starts ACP with a subcommand; the old Gemini CLI used a flag.
+    const isAgy = /(^|[\\/])agy(\.exe)?$/i.test(config.geminiCli);
+    const args = isAgy ? ['acp'] : ['--acp', '--approval-mode', 'plan'];
+    if (config.geminiModel) args.push(isAgy ? '--model' : '-m', config.geminiModel);
     const options = { cwd: this.cwd, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true };
     // On Windows gemini is a .cmd shim, which needs a shell; quote the path
     // (it may contain spaces). The arguments are fixed flags and a model name.
@@ -91,12 +94,15 @@ export class GeminiAcp {
     });
     readline.createInterface({ input: child.stdout }).on('line', (line) => this.#onLine(line));
 
-    await this.#request('initialize', {
+    const init = await this.#request('initialize', {
       protocolVersion: PROTOCOL_VERSION,
       clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
       clientInfo: { name: 'call-claude', version: '1.0.0' },
     }, 60_000);
     // The first time this opens a Google sign-in page in the browser: allow time for it.
+    // Can audio be attached directly? (Gemini CLI: yes; agy: not as an audio block.)
+    this.audioDirect = Boolean(init?.agentCapabilities?.promptCapabilities?.audio);
+    this.embedded = Boolean(init?.agentCapabilities?.promptCapabilities?.embeddedContext);
     await this.#request('authenticate', { methodId: LOGIN_WITH_GOOGLE }, 5 * 60_000);
     await this.#newSession();
     console.log('[gemini] Speech-to-text lewat Gemini CLI siap.');
@@ -195,14 +201,31 @@ export class GeminiAcp {
     this.running = false;
   }
 
+  /** The prompt block that carries a WAV clip, or null if audio can't be sent. */
+  audioPart(wav) {
+    const data = wav.toString('base64');
+    if (this.audioDirect) return { type: 'audio', mimeType: 'audio/wav', data };
+    if (this.embedded && config.geminiAudio !== 'off') {
+      return { type: 'resource', resource: { uri: 'file:///suara.wav', mimeType: 'audio/wav', blob: data } };
+    }
+    return null;
+  }
+
+  /** True once started and audio can be attached in some form. */
+  get canHear() {
+    return Boolean(this.sessionId) && (this.audioDirect || (this.embedded && config.geminiAudio !== 'off'));
+  }
+
   /**
    * Transcribe a WAV clip. Resolves to the text ('' when nothing was said).
    * @param {Buffer} wav
    */
   async transcribe(wav) {
+    await this.start();
+    if (!this.audioPart(wav)) throw new Error('Gemini tidak bisa menerima audio');
     const text = await this.ask([
       { type: 'text', text: TRANSCRIBE_PROMPT },
-      { type: 'audio', mimeType: 'audio/wav', data: wav.toString('base64') },
+      this.audioPart(wav),
     ]);
     return /^<?kosong>?\.?$/i.test(text) ? '' : text;
   }

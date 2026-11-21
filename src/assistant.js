@@ -204,7 +204,12 @@ export class Assistant {
     let result;
     try {
       result = frontEnabled ? await this.#converse({ mono, name, isOwner }) : null;
-      if (!result) result = { heard: await transcribe(mono, { quick: true }), say: '', forward: null, fallback: true };
+      if (!result) {
+        // Gemini can't take the audio (or failed): Whisper writes it down.
+        const heard = await transcribe(mono, { quick: true });
+        const answer = heard && frontEnabled ? await this.#converse({ text: heard, name, isOwner }) : null;
+        result = answer ? { ...answer, heard } : { heard, say: '', forward: null, fallback: true };
+      }
     } catch (err) {
       console.error('[bot] STT gagal:', err.message);
       return;

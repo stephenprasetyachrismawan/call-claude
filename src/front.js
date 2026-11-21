@@ -35,6 +35,8 @@ export const frontEnabled = Boolean(gemini);
  * @returns {Promise<{ heard: string, say: string, forward: string | null }>}
  */
 export async function converse({ mono, text, name, isOwner }) {
+  await gemini.start();
+  if (mono && !gemini.canHear) throw new Error('Gemini tidak bisa menerima audio');
   const who = `${name} (${isOwner ? 'pemilik' : 'tamu'})`;
   const parts = [
     {
@@ -44,7 +46,7 @@ export async function converse({ mono, text, name, isOwner }) {
       }\nBalas HANYA satu baris JSON: {"heard": "transkrip kata demi kata", "say": "balasanmu", "forward": "permintaan untuk Claude" atau null}\nKalau tidak ada ucapan yang jelas: {"heard": "", "say": "", "forward": null}`,
     },
   ];
-  if (mono) parts.push({ type: 'audio', mimeType: 'audio/wav', data: monoToWav(mono).toString('base64') });
+  if (mono) parts.push(gemini.audioPart(monoToWav(mono)));
   const raw = await gemini.ask(parts, { priority: 0 });
   const data = parseJson(raw);
   if (!data) {

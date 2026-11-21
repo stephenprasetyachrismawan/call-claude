@@ -56,7 +56,11 @@ export const config = {
   // 'gemini' = Gemini CLI (Google login / Gemini subscription), Whisper as fallback;
   // 'whisper' = local Whisper only.
   sttProvider: optional('STT_PROVIDER', 'gemini') === 'whisper' ? 'whisper' : 'gemini',
-  geminiCli: optional('GEMINI_CLI', 'gemini'),
+  // Antigravity CLI (agy) replaced Gemini CLI for personal Google accounts.
+  geminiCli: optional('GEMINI_CLI', 'agy'),
+  // 'auto' = send the owner's audio to Gemini when the CLI accepts it;
+  // 'off' = Whisper writes it down and Gemini gets text.
+  geminiAudio: optional('GEMINI_AUDIO', 'auto') === 'off' ? 'off' : 'auto',
   geminiModel: optional('GEMINI_MODEL', ''),
   geminiTimeoutS: int('GEMINI_TIMEOUT_S', 25),
   sttLanguage: optional('STT_LANGUAGE', 'id'),
