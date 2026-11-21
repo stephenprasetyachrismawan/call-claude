@@ -21,6 +21,15 @@ function int(name, fallback) {
   return Number.isFinite(n) ? n : fallback;
 }
 
+// Older .env files used Groq model names (no "owner/" prefix). Map them to the local model.
+function sttModel() {
+  const fallback = 'onnx-community/whisper-small';
+  const value = optional('STT_MODEL', fallback);
+  if (value.includes('/')) return value;
+  console.warn(`[config] STT_MODEL=${value} bukan model lokal, memakai ${fallback}.`);
+  return fallback;
+}
+
 export const config = {
   discordToken: required('DISCORD_TOKEN'),
   ownerUserId: required('OWNER_USER_ID'),
@@ -33,7 +42,7 @@ export const config = {
   claudeOAuthToken: optional('CLAUDE_CODE_OAUTH_TOKEN', ''),
 
   sttLanguage: optional('STT_LANGUAGE', 'id'),
-  sttModel: optional('STT_MODEL', 'onnx-community/whisper-small'),
+  sttModel: sttModel(),
   sttDtype: optional('STT_DTYPE', 'q8'),
   ttsVoice: optional('TTS_VOICE', 'id-ID-GadisNeural'),
   ttsRate: optional('TTS_RATE', '+10%'),
