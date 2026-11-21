@@ -16,9 +16,9 @@ test('long answers are not truncated', () => {
 
 test('splitForSpeech keeps every word, in order, in short pieces', () => {
   const text = toSpeakable('Halo. ' + 'Ini kalimat yang cukup panjang, dengan koma, untuk diuji. '.repeat(15) + 'kata '.repeat(120));
-  const pieces = splitForSpeech(text, 280);
+  const pieces = splitForSpeech(text, 180);
   assert.ok(pieces.length > 3);
-  for (const p of pieces) assert.ok(p.length <= 281, p.length);
+  for (const p of pieces) assert.ok(p.length <= 181, p.length);
   assert.equal(pieces.join(' ').replace(/\s+/g, ' '), text.replace(/\s+/g, ' '));
 });
 

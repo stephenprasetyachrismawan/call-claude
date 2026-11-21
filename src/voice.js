@@ -37,7 +37,11 @@ export class VoiceLink extends EventEmitter {
     super();
     this.channel = channel;
     this.connection = null;
-    this.player = createAudioPlayer({ behaviors: { noSubscriber: NoSubscriberBehavior.Play } });
+    // maxMissedFrames: never give up on a clip because audio arrived late
+    // (the default of 5 frames = 100 ms is what used to cut answers off).
+    this.player = createAudioPlayer({
+      behaviors: { noSubscriber: NoSubscriberBehavior.Play, maxMissedFrames: 500 },
+    });
     this.player.on('error', (err) => console.error('[voice] player error:', err.message));
     this.recording = false;
     this.speechChain = Promise.resolve();
@@ -104,10 +108,15 @@ export class VoiceLink extends EventEmitter {
     this.pendingSpeech += 1;
     this.speechChain = this.speechChain
       .then(async () => {
-        let next = this.#synth(pieces[0]);
+        // Fetch up to PREFETCH pieces ahead while the current one plays.
+        const PREFETCH = 2;
+        const clips = [];
+        const fetchUpTo = (n) => {
+          for (let j = clips.length; j < Math.min(n, pieces.length); j++) clips.push(this.#synth(pieces[j]));
+        };
         for (let i = 0; i < pieces.length; i++) {
-          const audio = await next;
-          next = i + 1 < pieces.length ? this.#synth(pieces[i + 1]) : null;
+          fetchUpTo(i + 1 + PREFETCH);
+          const audio = await clips[i];
           if (this.closed || !this.connection) return;
           if (audio?.length) await this.#play(audio);
         }

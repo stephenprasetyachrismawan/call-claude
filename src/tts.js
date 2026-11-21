@@ -1,7 +1,9 @@
 import { MsEdgeTTS, OUTPUT_FORMAT } from 'msedge-tts';
 import { config } from './config.js';
 
-const MAX_CHUNK_CHARS = 280;
+// Edge TTS delivers audio only about as fast as it plays, so pieces are kept
+// short: the first one is ready quickly and the next ones are fetched ahead.
+const MAX_CHUNK_CHARS = 180;
 const SYNTH_TIMEOUT_MS = 45_000;
 
 /** Strip markdown and other things that sound bad when read aloud. */
