@@ -72,7 +72,9 @@ export class GeminiAcp {
     // starts ACP with a subcommand; the old Gemini CLI used a flag.
     const isAgy = /(^|[\\/])agy(\.exe)?$/i.test(config.geminiCli);
     const args = isAgy ? ['acp'] : ['--acp', '--approval-mode', 'plan'];
-    if (config.geminiModel) args.push(isAgy ? '--model' : '-m', config.geminiModel);
+    // Fast model by default for agy: the front only chats and routes.
+    const model = config.geminiModel || (isAgy ? 'gemini-3.8-flash-low' : '');
+    if (model) args.push(isAgy ? '--model' : '-m', model);
     const options = { cwd: this.cwd, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true };
     // On Windows gemini is a .cmd shim, which needs a shell; quote the path
     // (it may contain spaces). The arguments are fixed flags and a model name.
@@ -205,7 +207,9 @@ export class GeminiAcp {
   audioPart(wav) {
     const data = wav.toString('base64');
     if (this.audioDirect) return { type: 'audio', mimeType: 'audio/wav', data };
-    if (this.embedded && config.geminiAudio !== 'off') {
+    // agy accepts embedded resources but (tested, v1.5.13) drops the audio;
+    // only try it when explicitly asked for.
+    if (this.embedded && config.geminiAudio === 'embedded') {
       return { type: 'resource', resource: { uri: 'file:///suara.wav', mimeType: 'audio/wav', blob: data } };
     }
     return null;
@@ -213,7 +217,7 @@ export class GeminiAcp {
 
   /** True once started and audio can be attached in some form. */
   get canHear() {
-    return Boolean(this.sessionId) && (this.audioDirect || (this.embedded && config.geminiAudio !== 'off'));
+    return Boolean(this.sessionId) && (this.audioDirect || (this.embedded && config.geminiAudio === 'embedded'));
   }
 
   /**

@@ -60,7 +60,8 @@ export const config = {
   geminiCli: optional('GEMINI_CLI', 'agy'),
   // 'auto' = send the owner's audio to Gemini when the CLI accepts it;
   // 'off' = Whisper writes it down and Gemini gets text.
-  geminiAudio: optional('GEMINI_AUDIO', 'auto') === 'off' ? 'off' : 'auto',
+  // 'embedded' also tries agy's embedded resources (currently drops audio).
+  geminiAudio: ['off', 'embedded'].includes(optional('GEMINI_AUDIO', 'auto')) ? optional('GEMINI_AUDIO', 'auto') : 'auto',
   geminiModel: optional('GEMINI_MODEL', ''),
   geminiTimeoutS: int('GEMINI_TIMEOUT_S', 25),
   sttLanguage: optional('STT_LANGUAGE', 'id'),
