@@ -43,3 +43,22 @@ export function rms(mono) {
   }
   return Math.sqrt(acc / n);
 }
+
+/** Wrap mono 16 kHz s16le PCM in a WAV header. */
+export function monoToWav(mono, rate = TARGET_RATE) {
+  const header = Buffer.alloc(44);
+  header.write('RIFF', 0);
+  header.writeUInt32LE(36 + mono.length, 4);
+  header.write('WAVE', 8);
+  header.write('fmt ', 12);
+  header.writeUInt32LE(16, 16); // fmt chunk size
+  header.writeUInt16LE(1, 20); // PCM
+  header.writeUInt16LE(1, 22); // mono
+  header.writeUInt32LE(rate, 24);
+  header.writeUInt32LE(rate * 2, 28); // byte rate
+  header.writeUInt16LE(2, 32); // block align
+  header.writeUInt16LE(16, 34); // bits per sample
+  header.write('data', 36);
+  header.writeUInt32LE(mono.length, 40);
+  return Buffer.concat([header, mono]);
+}

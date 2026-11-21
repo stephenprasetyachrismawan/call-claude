@@ -53,6 +53,12 @@ export const config = {
   serverTmux: optional('SERVER_TMUX', ''),
   serverName: optional('SERVER_NAME', 'server'),
 
+  // 'gemini' = Gemini CLI (Google login / Gemini subscription), Whisper as fallback;
+  // 'whisper' = local Whisper only.
+  sttProvider: optional('STT_PROVIDER', 'gemini') === 'whisper' ? 'whisper' : 'gemini',
+  geminiCli: optional('GEMINI_CLI', 'gemini'),
+  geminiModel: optional('GEMINI_MODEL', ''),
+  geminiTimeoutS: int('GEMINI_TIMEOUT_S', 25),
   sttLanguage: optional('STT_LANGUAGE', 'id'),
   sttModel: sttModel(),
   sttDtype: optional('STT_DTYPE', 'q8'),

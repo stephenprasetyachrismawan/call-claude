@@ -224,7 +224,7 @@ export class VoiceLink extends EventEmitter {
     if (pcmDurationSeconds(pcm) < MIN_UTTERANCE_S) return;
     const mono = toMono16k(pcm);
     if (rms(mono) < MIN_LOUDNESS) return;
-    const text = await transcribe(mono);
+    const text = await transcribe(mono, { quick: wakeOnly });
     if (!text) return;
     const wake = parseWakeWord(text);
     if (wakeOnly) {
