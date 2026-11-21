@@ -77,8 +77,9 @@ export function claudeEnv() {
  *   requestApproval({ toolName, reason, summary }) => Promise<boolean>
  */
 export class ClaudeSession {
-  constructor(handlers) {
+  constructor(handlers, model = config.claudeModel) {
     this.handlers = handlers;
+    this.model = model;
     this.queue = null;
     this.q = null;
     this.pending = 0; // user messages sent but not yet answered
@@ -96,6 +97,12 @@ export class ClaudeSession {
       message: { role: 'user', content: text },
       parent_tool_use_id: null,
     });
+  }
+
+  /** Switch model; a running conversation keeps its context. */
+  async setModel(model) {
+    this.model = model;
+    await this.q?.setModel(model).catch((err) => console.error('[claude] setModel:', err.message));
   }
 
   async interrupt() {
@@ -122,7 +129,7 @@ export class ClaudeSession {
       prompt: this.queue,
       options: {
         cwd: config.workspaceDir,
-        model: config.claudeModel,
+        model: this.model,
         env: claudeEnv(),
         abortController: this.abort,
         // Load the owner's Claude Code setup: user/project settings, CLAUDE.md,

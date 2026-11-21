@@ -6,6 +6,9 @@
 #   list                      -> JSON list of tmux panes running Claude
 #   send <target> <b64 text>  -> JSON lines: {"event": "tool"|"done"|"error"|"timeout", ...}
 #   interrupt <target>        -> presses Escape in the pane
+#   type <target> <b64 text>  -> types the text + Enter, prints {"event": "typed", "sessionId": ...}
+#   watch                     -> runs until killed; prints {"event": "answer", ...} every time any
+#                                Claude session on this server finishes a turn
 import base64
 import glob
 import json
@@ -151,12 +154,87 @@ def send(target, b64):
     out({'event': 'timeout', 'text': last_text})
 
 
+def type_text(target, b64):
+    text = base64.b64decode(b64).decode('utf-8').replace('\r', ' ').replace('\n', ' ').strip()
+    row = resolve(target)
+    if not row:
+        out({'event': 'error', 'message': f'Tidak ada sesi Claude di tmux "{target}".'})
+        return
+    subprocess.run(['tmux', 'send-keys', '-t', row['target'], '-l', text])
+    time.sleep(0.3)
+    subprocess.run(['tmux', 'send-keys', '-t', row['target'], 'Enter'])
+    out({'event': 'typed', 'sessionId': row['sessionId']})
+
+
+def last_answer(path):
+    try:
+        size = os.path.getsize(path)
+        with open(path, 'rb') as f:
+            f.seek(max(0, size - 512 * 1024))
+            lines = f.read().decode('utf-8', 'replace').split('\n')
+        if size > 512 * 1024:
+            lines = lines[1:]
+    except OSError:
+        return ''
+    answer = ''
+    for line in lines:
+        try:
+            d = json.loads(line)
+        except ValueError:
+            continue
+        if d.get('isSidechain'):
+            continue
+        msg = d.get('message') or {}
+        content = msg.get('content')
+        if d.get('type') == 'user' and not d.get('isMeta'):
+            if isinstance(content, str) or any(b.get('type') == 'text' for b in content or []):
+                answer = ''
+        elif d.get('type') == 'assistant':
+            t = text_of(content)
+            if t:
+                answer = t
+    return answer
+
+
+def watch():
+    seen = {}
+    spoken = {}
+    first = True
+    while True:
+        for path in glob.glob(os.path.join(HOME, '.claude', 'sessions', '*.json')):
+            try:
+                with open(path) as f:
+                    info = json.load(f)
+            except (OSError, ValueError):
+                continue
+            sid = info.get('sessionId')
+            if not sid:
+                continue
+            key = f"{info.get('status')}@{info.get('statusUpdatedAt', '')}"
+            prev = seen.get(sid)
+            seen[sid] = key
+            if first or prev is None or prev == key or info.get('status') != 'idle':
+                continue
+            tpath = transcript(sid)
+            text = last_answer(tpath) if tpath else ''
+            if text and spoken.get(sid) != text:
+                spoken[sid] = text
+                tmux = next((r['tmux'] for r in panes() if r['sessionId'] == sid), None)
+                out({'event': 'answer', 'sessionId': sid, 'name': info.get('name'), 'tmux': tmux, 'text': text})
+        first = False
+        time.sleep(1.5)
+
+
 def main():
     action = sys.argv[1] if len(sys.argv) > 1 else 'list'
     if action == 'list':
         out(panes())
     elif action == 'send':
         send(sys.argv[2], sys.argv[3])
+    elif action == 'type':
+        type_text(sys.argv[2], sys.argv[3])
+    elif action == 'watch':
+        watch()
     elif action == 'interrupt':
         row = resolve(sys.argv[2])
         if row:

@@ -2,9 +2,19 @@ import { randomUUID } from 'node:crypto';
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
 import { config } from './config.js';
 import { Orchestrator } from './orchestrator.js';
-import { RemoteSession } from './remote.js';
+import path from 'node:path';
+import { RemoteSession, RemoteWatcher } from './remote.js';
 import { VoiceLink } from './voice.js';
-import { isResetCommand, isStatusCommand, isStopCommand, parseSwitchCommand, parseYesNo } from './safety.js';
+import { LocalSessionWatcher } from './watcher.js';
+import {
+  MODELS,
+  isResetCommand,
+  isStatusCommand,
+  isStopCommand,
+  parseModelCommand,
+  parseSwitchCommand,
+  parseYesNo,
+} from './safety.js';
 
 const DISCORD_LIMIT = 1900;
 
@@ -58,6 +68,56 @@ export class Assistant {
     });
     this.remote = config.serverSsh && config.serverTmux ? new RemoteSession(handlers(`[${config.serverName}]`)) : null;
     this.claude = this.local; // the session the owner is currently talking to
+    this.model = Object.keys(MODELS).find((k) => MODELS[k].id === config.claudeModel) ?? null;
+
+    // Answers from every other Claude session are read aloud as soon as they exist.
+    const sameDir = (a, b) => path.resolve(a ?? '').toLowerCase() === path.resolve(b ?? '').toLowerCase();
+    this.localWatcher = new LocalSessionWatcher({
+      // Skip the bot's own workers (Agent SDK sessions in the bot's folder).
+      skip: (info) => String(info.entrypoint ?? '').startsWith('sdk') && sameDir(info.cwd, config.workspaceDir),
+      onAnswer: ({ name, text }) => this.say(`**[laptop · ${name}]** ${text}`, `Dari sesi ${name}. ${text}`),
+    });
+    this.remoteWatcher = this.remote
+      ? new RemoteWatcher({
+          onAnswer: (event) => {
+            if (this.remote.isMine(event)) {
+              this.remote.answered();
+              this.say(`**[${config.serverName}]** ${event.text}`, `Dari ${config.serverName}. ${event.text}`);
+            } else {
+              const name = event.name || event.tmux || 'lain';
+              this.say(`**[${config.serverName} · ${name}]** ${event.text}`, `Dari sesi ${name} di ${config.serverName}. ${event.text}`);
+            }
+          },
+        })
+      : null;
+  }
+
+  get modelName() {
+    return this.model ? MODELS[this.model].name : config.claudeModel;
+  }
+
+  /** Switch the model of all laptop workers (existing and new). */
+  async setModel(key) {
+    if (!MODELS[key]) return;
+    this.model = key;
+    this.local.setModel(MODELS[key].id);
+    await this.say(`Oke, sekarang pakai ${MODELS[key].name}.`);
+  }
+
+  /** Buttons to pick the model, posted when a call starts. */
+  async #postModelPicker() {
+    if (!this.textChannel) return;
+    const row = new ActionRowBuilder().addComponents(
+      ...Object.entries(MODELS).map(([key, m]) =>
+        new ButtonBuilder()
+          .setCustomId(`model:${key}`)
+          .setLabel(m.name)
+          .setStyle(key === this.model ? ButtonStyle.Primary : ButtonStyle.Secondary),
+      ),
+    );
+    await this.textChannel
+      .send({ content: `🧠 Model sekarang: **${this.modelName}**. Pilih model lain:`, components: [row], allowedMentions: { parse: [] } })
+      .catch(() => {});
   }
 
   get inCall() {
@@ -92,7 +152,12 @@ export class Assistant {
     try {
       await voice.join();
       console.log(`[bot] Masuk ke voice channel ${voiceChannel.name}`);
-      await this.say('Halo, Claude siap. Silakan bicara.');
+      this.localWatcher.start();
+      this.remoteWatcher?.start();
+      this.#postModelPicker();
+      await this.say(
+        `Halo, Claude siap dengan model ${this.modelName}. Untuk ganti, bilang pakai Opus atau pakai Haiku, atau tekan tombol di chat.`,
+      );
     } catch (err) {
       console.error('[bot] Gagal masuk voice channel:', err.message);
       this.voice = null;
@@ -101,6 +166,8 @@ export class Assistant {
   }
 
   disconnect({ keepConversation = false } = {}) {
+    this.localWatcher.stop();
+    this.remoteWatcher?.stop();
     if (this.voice) {
       this.voice.leave();
       this.voice = null;
@@ -141,6 +208,12 @@ export class Assistant {
       return;
     }
 
+    const model = parseModelCommand(clean);
+    if (model) {
+      await this.setModel(model);
+      return;
+    }
+
     const target = parseSwitchCommand(clean);
     if (target === 'server') {
       if (!this.remote) {
@@ -167,9 +240,8 @@ export class Assistant {
       this.local.send(clean); // the head acknowledges once it has picked a topic
       return;
     }
-    const wasBusy = this.claude.busy;
-    this.claude.send(clean);
-    if (source === 'voice') this.voice?.speak(wasBusy ? 'Oke, nanti saya kerjakan juga.' : 'Sebentar.');
+    if (source === 'voice') this.voice?.speak(`Oke, saya teruskan ke ${config.serverName}.`);
+    await this.claude.send(clean);
   }
 
   // ---- output ---------------------------------------------------------

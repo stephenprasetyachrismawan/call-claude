@@ -134,3 +134,26 @@ const STATUS_COMMAND = /^\s*(status|lagi (ngerjain|mengerjakan|kerja) apa|sedang
 export function isStatusCommand(text) {
   return STATUS_COMMAND.test(String(text ?? ''));
 }
+
+/** Models the owner can pick during a call. */
+export const MODELS = {
+  sonnet: { id: 'claude-sonnet-5-5', name: 'Sonnet' },
+  opus: { id: 'claude-opus-5-5', name: 'Opus' },
+  haiku: { id: 'claude-haiku-5-5', name: 'Haiku' },
+};
+
+// Whisper often hears "Sonnet" as "sonet"/"sonit" and "Opus" as "opes"/"opos".
+const MODEL_WORDS = [
+  ['sonnet', /\b(son+[eia]t+|sonet|sonit)\b/i],
+  ['opus', /\b(op[uoe]s|opus)\b/i],
+  ['haiku', /\b(h[ae]iku|haikyu)\b/i],
+];
+const MODEL_VERB = /\b(pakai|pake|gunakan|ganti|ubah|pindah|switch|model)\b/i;
+
+/** "pakai opus", "ganti ke model sonnet" -> 'opus' / 'sonnet' / 'haiku', else null. */
+export function parseModelCommand(text) {
+  const t = String(text ?? '');
+  if (t.length > 60 || !MODEL_VERB.test(t)) return null;
+  for (const [key, re] of MODEL_WORDS) if (re.test(t)) return key;
+  return null;
+}

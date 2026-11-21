@@ -37,7 +37,7 @@ export const config = {
 
   textChannelId: optional('TEXT_CHANNEL_ID', ''),
 
-  claudeModel: optional('CLAUDE_MODEL', 'claude-opus-5-5'),
+  claudeModel: optional('CLAUDE_MODEL', 'claude-sonnet-5-5'),
   workspaceDir: path.resolve(optional('WORKSPACE_DIR', path.join(os.homedir(), 'claude-workspace'))),
   claudeOAuthToken: optional('CLAUDE_CODE_OAUTH_TOKEN', ''),
   // 'bypass' = Claude runs everything without asking; 'confirm' = risky actions need approval.

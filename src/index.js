@@ -81,10 +81,15 @@ client.on(Events.MessageCreate, async (message) => {
 client.on(Events.InteractionCreate, async (interaction) => {
   if (!interaction.isButton()) return;
   const [action, id] = interaction.customId.split(':');
-  if (action !== 'approve' && action !== 'deny') return;
+  if (action !== 'approve' && action !== 'deny' && action !== 'model') return;
 
   if (!isOwner(interaction.user.id)) {
     await interaction.reply({ content: 'Hanya pemilik yang bisa menjawab ini.', ephemeral: true }).catch(() => {});
+    return;
+  }
+  if (action === 'model') {
+    await interaction.deferUpdate().catch(() => {});
+    await assistant.setModel(id);
     return;
   }
   const ok = assistant.resolveApprovalButton(id, action === 'approve');

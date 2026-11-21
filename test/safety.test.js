@@ -103,3 +103,12 @@ test('status command', async () => {
   assert.equal(isStatusCommand('lagi ngerjain apa'), true);
   assert.equal(isStatusCommand('status server bagaimana'), false);
 });
+
+test('model commands', async () => {
+  const { parseModelCommand } = await import('../src/safety.js');
+  assert.equal(parseModelCommand('Pakai Opus.'), 'opus');
+  assert.equal(parseModelCommand('ganti ke model sonet'), 'sonnet');
+  assert.equal(parseModelCommand('model haiku'), 'haiku');
+  assert.equal(parseModelCommand('opus itu apa'), null);
+  assert.equal(parseModelCommand('buka chrome'), null);
+});

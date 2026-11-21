@@ -21,6 +21,13 @@ export class Orchestrator {
     this.topics = new Map(); // id -> { id, label, session, lastQuestion, lastAnswer, lastUsed }
     this.nextId = 1;
     this.routing = Promise.resolve(); // keep utterances in order
+    this.model = config.claudeModel;
+  }
+
+  /** Model for all topic workers, existing and new. */
+  setModel(model) {
+    this.model = model;
+    for (const t of this.topics.values()) t.session.setModel(model);
   }
 
   get busy() {
@@ -72,7 +79,7 @@ export class Orchestrator {
       onError: (message) => this.handlers.onError(message, topic.label),
       onToolUse: (name, summary) => this.handlers.onToolUse?.(name, summary, topic.label),
       requestApproval: (req) => this.handlers.requestApproval(req),
-    });
+    }, this.model);
     this.topics.set(id, topic);
     return topic;
   }
