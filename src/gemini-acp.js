@@ -72,9 +72,10 @@ export class GeminiAcp {
     // starts ACP with a subcommand; the old Gemini CLI used a flag.
     const isAgy = /(^|[\\/])agy(\.exe)?$/i.test(config.geminiCli);
     const args = isAgy ? ['acp'] : ['--acp', '--approval-mode', 'plan'];
-    // Fast model by default for agy: the front only chats and routes.
-    const model = config.geminiModel || (isAgy ? 'gemini-3.8-flash-low' : '');
-    if (model) args.push(isAgy ? '--model' : '-m', model);
+    // agy picks the model per session (session/set_model); Gemini CLI by flag.
+    this.model = config.geminiModel || (isAgy ? 'gemini-3.8-flash-low' : '');
+    if (this.model && !isAgy) args.push('-m', this.model);
+    this.isAgy = isAgy;
     const options = { cwd: this.cwd, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true };
     // On Windows gemini is a .cmd shim, which needs a shell; quote the path
     // (it may contain spaces). The arguments are fixed flags and a model name.
@@ -113,6 +114,12 @@ export class GeminiAcp {
   async #newSession() {
     const res = await this.#request('session/new', { cwd: this.cwd, mcpServers: [] }, 60_000);
     this.sessionId = res.sessionId;
+    if (this.isAgy && this.model) {
+      // Fast model: the front only chats and routes. Ignore if unsupported.
+      await this.#request('session/set_model', { sessionId: this.sessionId, modelId: this.model }, 15_000).catch((err) =>
+        console.error('[gemini] set_model:', err.message, JSON.stringify(res.models ?? res.configOptions ?? {}).slice(0, 300)),
+      );
+    }
     this.prompts = 0;
   }
 
