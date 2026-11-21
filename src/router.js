@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import { config } from './config.js';
-import { AsyncQueue, claudeEnv } from './claude.js';
+import { AsyncQueue, claudeEnv, trackedSpawn } from './claude.js';
 
 const ROUTER_PROMPT = `
 Kamu adalah "kepala" yang memilah ucapan pemilik ke topik kerja yang sedang berjalan.
@@ -33,7 +33,9 @@ export class Router {
       options: {
         cwd: config.workspaceDir,
         model: config.routerModel,
-        env: claudeEnv(),
+        env: { ...claudeEnv(), CLAUDE_CALL_SESSION: '1' },
+        title: 'ClaudeCall · kepala',
+        spawnClaudeCodeProcess: trackedSpawn('ClaudeCall · kepala'),
         settingSources: [],
         tools: [],
         effort: 'low',
@@ -58,6 +60,11 @@ export class Router {
   /** Start the router process ahead of time so the first routing is fast. */
   warm() {
     if (!this.q) this.#start();
+  }
+
+  /** Stop the router process (it starts again on the next call). */
+  stop() {
+    this.#restart();
   }
 
   #restart() {

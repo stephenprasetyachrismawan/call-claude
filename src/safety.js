@@ -157,3 +157,56 @@ export function parseModelCommand(text) {
   for (const [key, re] of MODEL_WORDS) if (re.test(t)) return key;
   return null;
 }
+
+// ---- wake word ----------------------------------------------------------
+
+// Whisper hears "Claude" in many ways in Indonesian speech.
+const WAKE = /^\W*(?:hey|hei|hai|hay|high|hi|hy|he|eh|halo|oi|oy)[\s,.!-]*(?:claude|clode|claud|klod|klot|klaud|klaut|clod|cloud|claw?d|kloud|glod|clot)\b[\s,.!?-]*/i;
+
+/**
+ * "Hey Claude, buka Chrome" -> { rest: 'buka Chrome' }; "hey claude" -> { rest: '' };
+ * anything without the wake word at the start -> null.
+ */
+export function parseWakeWord(text) {
+  const t = String(text ?? '').trim();
+  const m = t.match(WAKE);
+  if (!m) return null;
+  return { rest: t.slice(m[0].length).trim() };
+}
+
+// ---- actions that need the owner's spoken OK (even in bypass mode) -------
+
+const SEND_TOOL = /(^|_)(send|post|reply|forward|publish|tweet|comment|invite|share|respond|create_draft|update_draft|schedule)(_|$)/i;
+const SEND_SHELL = [
+  [/\bSend-MailMessage\b/i, 'mengirim email'],
+  [/\b(Invoke-RestMethod|Invoke-WebRequest|irm|iwr)\b[^|;]*-Method\s+['"]?(Post|Put|Patch|Delete)\b/i, 'mengirim data ke internet'],
+  [/\bcurl\b[^|;]*(\s-X\s*['"]?(POST|PUT|PATCH|DELETE)\b|\s--data\b|\s-d\s|\s-F\s|\s--form\b)/i, 'mengirim data ke internet'],
+  [/\bgh\s+(pr|issue)\s+(comment|review)\b/i, 'mengirim komentar'],
+  [/\b(Stop-Computer|Restart-Computer|shutdown(\.exe)?\s+\/[srlh])\b/i, 'mematikan atau me-restart laptop'],
+  // Pressing Enter in a chat app (WhatsApp, Telegram, ...) sends the message.
+  [/type\.ps1[^|;]*-Keys\s+['"]?[^'"]*\{ENTER\}/i, 'menekan Enter (bisa mengirim pesan)'],
+];
+
+/**
+ * Does this tool call need the owner's spoken OK? Sending messages, posting,
+ * email, sending data out and shutdown do; writing and running code doesn't.
+ * Messages to the owner's own Claude sessions (SendMessage) don't either.
+ * @returns {null | { reason: string, summary: string }}
+ */
+export function needsConsent(toolName, input = {}) {
+  const described = typeof input.description === 'string' ? input.description.trim() : '';
+  if (toolName.startsWith('mcp__')) {
+    const action = toolName.split('__').pop();
+    if (SEND_TOOL.test(action)) {
+      return { reason: `memakai ${action.replace(/_/g, ' ')}`, summary: described || shorten(JSON.stringify(input)) };
+    }
+    return null;
+  }
+  if (SHELL_TOOLS.has(toolName)) {
+    const command = String(input.command ?? '');
+    for (const [pattern, reason] of SEND_SHELL) {
+      if (pattern.test(command)) return { reason, summary: described || shorten(command) };
+    }
+  }
+  return null;
+}

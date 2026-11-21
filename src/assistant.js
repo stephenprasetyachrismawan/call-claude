@@ -6,6 +6,7 @@ import path from 'node:path';
 import { RemoteSession, RemoteWatcher } from './remote.js';
 import { VoiceLink } from './voice.js';
 import { LocalSessionWatcher } from './watcher.js';
+import { killAllClaudeCallProcesses } from './claude.js';
 import {
   MODELS,
   isResetCommand,
@@ -137,6 +138,7 @@ export class Assistant {
 
     const voice = new VoiceLink(voiceChannel);
     voice.on('utterance', (text) => this.handleInput(text, 'voice'));
+    voice.on('wake', () => this.log('🛑 "Hey Claude": bacaan dihentikan, saya mendengarkan.'));
     voice.on('stt-error', () => this.say('Maaf, suaramu gagal diproses. Coba ulangi.'));
     voice.on('closed', () => {
       if (this.voice !== voice) return;
@@ -152,6 +154,7 @@ export class Assistant {
     try {
       await voice.join();
       console.log(`[bot] Masuk ke voice channel ${voiceChannel.name}`);
+      this.local.router.warm();
       this.localWatcher.start();
       this.remoteWatcher?.start();
       this.#postModelPicker();
@@ -174,7 +177,12 @@ export class Assistant {
       console.log('[bot] Keluar dari voice channel');
     }
     this.#settleApproval(false, 'panggilan berakhir');
-    if (!keepConversation) this.local.reset();
+    if (!keepConversation) {
+      // Call closed: stop every ClaudeCall session, foreground and background.
+      this.local.reset();
+      const killed = killAllClaudeCallProcesses();
+      console.log(`[bot] Panggilan ditutup: semua sesi ClaudeCall dihentikan (${killed} proses tersisa dimatikan).`);
+    }
   }
 
   // ---- input ----------------------------------------------------------
@@ -270,7 +278,7 @@ export class Assistant {
     return next;
   }
 
-  async #askApproval({ toolName, reason, summary }) {
+  async #askApproval({ toolName, reason, summary, consent }) {
     if (!this.textChannel && !this.inCall) return false;
 
     const id = randomUUID();
@@ -292,7 +300,10 @@ export class Assistant {
       this.approval = { id, resolve, message, timer };
     });
 
-    if (this.inCall) this.voice.speak(`Claude mau ${reason}. ${spokenSummary(toolName, summary)} Boleh? Jawab ya atau tidak.`);
+    if (this.inCall) {
+      const detail = consent ? `${summary.slice(0, 250)}.` : spokenSummary(toolName, summary);
+      this.voice.speak(`Saya perlu izinmu untuk ${reason}. ${detail} Boleh? Jawab ya atau tidak.`);
+    }
     return decision;
   }
 

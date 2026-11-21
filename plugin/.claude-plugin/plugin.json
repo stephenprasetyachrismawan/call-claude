@@ -1,0 +1,5 @@
+{
+  "name": "claude-call",
+  "version": "1.0.0",
+  "description": "Aturan kerja untuk sesi ClaudeCall: Claude yang ditelepon lewat voice channel Discord."
+}

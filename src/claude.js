@@ -1,17 +1,80 @@
+import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import { config } from './config.js';
-import { assessRisk } from './safety.js';
+import { assessRisk, needsConsent } from './safety.js';
 
-const SCRIPTS = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'scripts');
+const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
+const SCRIPTS = path.join(ROOT, 'scripts');
+export const PLUGIN_DIR = path.join(ROOT, 'plugin');
+
+// ---- every Claude Code process ClaudeCall starts --------------------------
+
+/** pid -> title of every live Claude Code process started by ClaudeCall. */
+const processes = new Map();
+
+/** Kill a process and everything it started (background shells, servers...). */
+function killTree(pid) {
+  if (process.platform === 'win32') {
+    spawnSync('taskkill', ['/PID', String(pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
+  } else {
+    try {
+      process.kill(-pid, 'SIGKILL'); // whole process group (spawned detached)
+    } catch {
+      try {
+        process.kill(pid, 'SIGKILL');
+      } catch {
+        // already gone
+      }
+    }
+  }
+}
+
+/**
+ * spawnClaudeCodeProcess for the Agent SDK: a normal spawn, but the pid is
+ * remembered so the whole tree can be killed when the call ends.
+ */
+export function trackedSpawn(title) {
+  return (options) => {
+    const child = spawn(options.command, options.args, {
+      cwd: options.cwd,
+      env: options.env,
+      signal: options.signal,
+      stdio: ['pipe', 'pipe', 'pipe'],
+      windowsHide: true,
+      detached: process.platform !== 'win32',
+    });
+    child.stderr?.on('data', () => {});
+    if (child.pid) {
+      processes.set(child.pid, title);
+      child.once('exit', () => processes.delete(child.pid));
+    }
+    return child;
+  };
+}
+
+/** Kill one tracked Claude Code process tree. */
+function killProcess(pid) {
+  if (!processes.has(pid)) return;
+  processes.delete(pid);
+  killTree(pid);
+}
+
+/** Kill every Claude Code process ClaudeCall started (and their children). */
+export function killAllClaudeCallProcesses() {
+  const pids = [...processes.keys()];
+  for (const pid of pids) killProcess(pid);
+  return pids.length;
+}
 const PS = 'powershell -NoProfile -ExecutionPolicy Bypass -File';
 
 const VOICE_PROMPT = `
 Kamu sedang ditelepon oleh pemilik laptop ini lewat voice channel Discord dari HP-nya.
 - Ucapannya diubah menjadi teks oleh speech-to-text, jadi bisa ada salah dengar. Kalau perintahnya ambigu, tanyakan dulu dengan singkat.
 - Jawabanmu akan dibacakan dengan text-to-speech. Jawab dalam Bahasa Indonesia yang santai dan singkat (1 sampai 3 kalimat, kecuali diminta detail). Jangan pakai markdown, tabel, daftar, atau blok kode. Sampaikan hasilnya, bukan langkah-langkahnya.
+- Kamu adalah sesi ClaudeCall. Selalu ikuti skill claude-call (gaya jawaban lisan, kapan minta izin, kerja kode bebas tanpa izin).
 - Laptop ini memakai Windows. Untuk urusan sistem, pakai PowerShell (misalnya: powershell -NoProfile -Command "...").
 - Folder kerja default: ${config.workspaceDir}
 - Kamu boleh bekerja di folder mana pun di laptop ini.
@@ -77,9 +140,11 @@ export function claudeEnv() {
  *   requestApproval({ toolName, reason, summary }) => Promise<boolean>
  */
 export class ClaudeSession {
-  constructor(handlers, model = config.claudeModel) {
+  constructor(handlers, model = config.claudeModel, title = 'ClaudeCall') {
     this.handlers = handlers;
     this.model = model;
+    this.title = title;
+    this.pids = new Set();
     this.queue = null;
     this.q = null;
     this.pending = 0; // user messages sent but not yet answered
@@ -111,9 +176,12 @@ export class ClaudeSession {
     await this.q.interrupt().catch(() => {});
   }
 
+  /** End the conversation and kill its Claude Code process with everything it started. */
   reset() {
     this.queue?.end();
     this.abort?.abort();
+    for (const pid of this.pids) killProcess(pid);
+    this.pids.clear();
     this.queue = null;
     this.q = null;
     this.pending = 0;
@@ -130,7 +198,18 @@ export class ClaudeSession {
       options: {
         cwd: config.workspaceDir,
         model: this.model,
-        env: claudeEnv(),
+        env: { ...claudeEnv(), CLAUDE_CALL_SESSION: '1' },
+        title: this.title,
+        spawnClaudeCodeProcess: (options) => {
+          const child = trackedSpawn(this.title)(options);
+          if (child.pid) this.pids.add(child.pid);
+          return child;
+        },
+        plugins: [{ type: 'local', path: PLUGIN_DIR }],
+        hooks: {
+          // Sending messages, posting, email, shutdown: ask the owner first, even in bypass mode.
+          PreToolUse: [{ hooks: [(input, _id, { signal }) => this.#consentHook(input, signal)], timeout: config.confirmTimeoutS + 30 }],
+        },
         abortController: this.abort,
         // Load the owner's Claude Code setup: user/project settings, CLAUDE.md,
         // skills, plugins and MCP servers, just like running `claude` there.
@@ -150,6 +229,24 @@ export class ClaudeSession {
     });
     this.q = q;
     this.#consume(q);
+  }
+
+  async #consentHook(input, signal) {
+    const need = needsConsent(input.tool_name ?? '', input.tool_input ?? {});
+    if (!need) return {};
+    const approved = await this.handlers
+      .requestApproval({ toolName: input.tool_name, reason: need.reason, summary: need.summary, consent: true })
+      .catch(() => false);
+    if (approved && !signal?.aborted) {
+      return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'allow', permissionDecisionReason: 'Pemilik mengizinkan.' } };
+    }
+    return {
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        permissionDecision: 'deny',
+        permissionDecisionReason: 'Pemilik tidak mengizinkan ini. Jangan kirim dengan cara lain; tanyakan apa yang mau diubah.',
+      },
+    };
   }
 
   async #canUseTool(toolName, input, signal) {
