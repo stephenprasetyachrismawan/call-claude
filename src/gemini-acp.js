@@ -11,7 +11,7 @@ import { config } from './config.js';
 
 const PROTOCOL_VERSION = 1;
 const LOGIN_WITH_GOOGLE = 'oauth-personal';
-const PROMPTS_PER_SESSION = 25; // start a fresh session so context stays small
+const PROMPTS_PER_SESSION = 60; // start a fresh session so context stays small
 
 const TRANSCRIBE_PROMPT = `
 Transkripsikan audio terlampir kata demi kata, dalam bahasa yang diucapkan (biasanya Bahasa Indonesia, kadang campur Inggris).
@@ -29,7 +29,9 @@ export class GeminiAcp {
     this.sessionId = null;
     this.prompts = 0;
     this.chunks = [];
-    this.chain = Promise.resolve(); // one prompt at a time
+    this.queue = []; // waiting prompts, sorted by priority
+    this.seq = 0;
+    this.running = false;
     // An empty folder, so Gemini doesn't read any project files as context.
     this.cwd = path.join(os.tmpdir(), 'claudecall-gemini');
   }
@@ -157,31 +159,46 @@ export class GeminiAcp {
   }
 
   /**
+   * Send one prompt (ACP content blocks) and resolve to Gemini's text reply.
+   * Prompts run one at a time; a lower priority number goes first
+   * (0 = the owner just spoke, 1 = relaying a message from Claude).
+   */
+  ask(parts, { priority = 0 } = {}) {
+    return new Promise((resolve, reject) => {
+      this.queue.push({ parts, priority, resolve, reject, seq: this.seq++ });
+      this.queue.sort((a, b) => a.priority - b.priority || a.seq - b.seq);
+      this.#drain();
+    });
+  }
+
+  async #drain() {
+    if (this.running) return;
+    this.running = true;
+    while (this.queue.length) {
+      const job = this.queue.shift();
+      try {
+        await this.start();
+        if (this.prompts >= PROMPTS_PER_SESSION) await this.#newSession();
+        this.prompts += 1;
+        this.chunks = [];
+        await this.#request('session/prompt', { sessionId: this.sessionId, prompt: job.parts }, config.geminiTimeoutS * 1000);
+        job.resolve(this.chunks.join('').trim());
+      } catch (err) {
+        job.reject(err);
+      }
+    }
+    this.running = false;
+  }
+
+  /**
    * Transcribe a WAV clip. Resolves to the text ('' when nothing was said).
    * @param {Buffer} wav
    */
-  transcribe(wav) {
-    const run = async () => {
-      await this.start();
-      if (this.prompts >= PROMPTS_PER_SESSION) await this.#newSession();
-      this.prompts += 1;
-      this.chunks = [];
-      await this.#request(
-        'session/prompt',
-        {
-          sessionId: this.sessionId,
-          prompt: [
-            { type: 'text', text: TRANSCRIBE_PROMPT },
-            { type: 'audio', mimeType: 'audio/wav', data: wav.toString('base64') },
-          ],
-        },
-        config.geminiTimeoutS * 1000,
-      );
-      const text = this.chunks.join('').trim();
-      return /^<?kosong>?\.?$/i.test(text) ? '' : text;
-    };
-    const result = this.chain.then(run, run);
-    this.chain = result.catch(() => {});
-    return result;
+  async transcribe(wav) {
+    const text = await this.ask([
+      { type: 'text', text: TRANSCRIBE_PROMPT },
+      { type: 'audio', mimeType: 'audio/wav', data: wav.toString('base64') },
+    ]);
+    return /^<?kosong>?\.?$/i.test(text) ? '' : text;
   }
 }

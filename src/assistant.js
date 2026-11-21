@@ -1,7 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
 import { config } from './config.js';
-import { Orchestrator } from './orchestrator.js';
+import { Conductor } from './conductor.js';
+import { converse, frontEnabled, relay } from './front.js';
+import { transcribe } from './stt.js';
 import path from 'node:path';
 import { RemoteSession, RemoteWatcher } from './remote.js';
 import { VoiceLink } from './voice.js';
@@ -51,23 +53,16 @@ export class Assistant {
         this.log(`🔧 ${label ? `[${label}] ` : ''}\`${name}\` ${summary ? `— ${String(summary).replace(/`/g, "'")}` : ''}`),
       requestApproval: (req) => this.requestApproval(req),
     });
-    // Laptop: a head that routes each utterance to a parallel worker per topic.
-    this.local = new Orchestrator({
-      onText: (text, label) => this.say(`**[${label}]** ${text}`, `Soal ${label}. ${text}`),
+    // Laptop: a main Claude session (orchestrator) with topic sessions under it.
+    // Its answers reach the owner through Gemini.
+    this.local = new Conductor({
+      onText: (text, label) => this.relay('Claude', text, label ? `Claude · ${label}` : 'Claude'),
       onError: (message, label) => this.say(label ? `**[${label}]** ${message}` : message),
       onToolUse: (name, summary, label) =>
         this.log(`🔧 [${label}] \`${name}\` ${summary ? `— ${String(summary).replace(/`/g, "'")}` : ''}`),
-      onRouted: (label, isNew, wasBusy) => {
-        const ack = isNew
-          ? `Oke, saya kerjakan soal ${label}.`
-          : wasBusy
-            ? `Oke, saya tambahkan ke soal ${label}.`
-            : `Oke, lanjut soal ${label}.`;
-        this.log(`🧭 ${ack}`);
-        if (this.inCall) this.voice.speak(ack);
-      },
       requestApproval: (req) => this.requestApproval(req),
     });
+    this.pendingConverse = 0; // utterances Gemini is still answering
     this.remote = config.serverSsh && config.serverTmux ? new RemoteSession(handlers(`[${config.serverName}]`)) : null;
     this.claude = this.local; // the session the owner is currently talking to
     // Other people in the voice channel: chat only, no tools, no access.
@@ -82,17 +77,17 @@ export class Assistant {
     this.localWatcher = new LocalSessionWatcher({
       // Skip the bot's own workers (Agent SDK sessions in the bot's folder).
       skip: (info) => String(info.entrypoint ?? '').startsWith('sdk') && sameDir(info.cwd, config.workspaceDir),
-      onAnswer: ({ name, text }) => this.say(`**[laptop · ${name}]** ${text}`, `Dari sesi ${name}. ${text}`),
+      onAnswer: ({ name, text }) => this.relay(`sesi Claude "${name}" di laptop`, text, `laptop · ${name}`),
     });
     this.remoteWatcher = this.remote
       ? new RemoteWatcher({
           onAnswer: (event) => {
             if (this.remote.isMine(event)) {
               this.remote.answered();
-              this.say(`**[${config.serverName}]** ${event.text}`, `Dari ${config.serverName}. ${event.text}`);
+              this.relay(`Claude di ${config.serverName}`, event.text, config.serverName);
             } else {
               const name = event.name || event.tmux || 'lain';
-              this.say(`**[${config.serverName} · ${name}]** ${event.text}`, `Dari sesi ${name} di ${config.serverName}. ${event.text}`);
+              this.relay(`sesi Claude "${name}" di ${config.serverName}`, event.text, `${config.serverName} · ${name}`);
             }
           },
         })
@@ -143,10 +138,13 @@ export class Assistant {
     if (!this.textChannel?.isTextBased()) this.textChannel = voiceChannel;
 
     const voice = new VoiceLink(voiceChannel);
-    voice.on('utterance', (text, userId) =>
-      this.handleInput(text, 'voice', { id: userId, name: voiceChannel.members.get(userId)?.displayName }),
-    );
-    voice.on('wake', () => this.log('🛑 "Hey Claude": bacaan dihentikan, saya mendengarkan.'));
+    const who = (userId) => ({ id: userId, name: voiceChannel.members.get(userId)?.displayName });
+    voice.on('audio', (mono, userId) => this.#onAudio(mono, who(userId)));
+    // Text after the wake word ("hey Gemini, ...") is handled like typed text.
+    voice.on('utterance', (text, userId) => this.handleInput(text, 'voice', who(userId)));
+    voice.on('wake', () => this.log('🛑 Wake word: bacaan dihentikan, saya mendengarkan.'));
+    // News from Claude waits while someone is talking or Gemini is answering.
+    voice.holdLow = () => voice.recording.size > 0 || this.pendingConverse > 0;
     voice.on('stt-error', () => this.say('Maaf, suaramu gagal diproses. Coba ulangi.'));
     voice.on('closed', () => {
       if (this.voice !== voice) return;
@@ -162,12 +160,14 @@ export class Assistant {
     try {
       await voice.join();
       console.log(`[bot] Masuk ke voice channel ${voiceChannel.name}`);
-      this.local.router.warm();
+      this.local.warm();
       this.localWatcher.start();
       this.remoteWatcher?.start();
       this.#postModelPicker();
       await this.say(
-        `Halo, Claude siap dengan model ${this.modelName}. Untuk ganti, bilang pakai Opus atau pakai Haiku, atau tekan tombol di chat.`,
+        frontEnabled
+          ? `Halo, aku Gemini. Claude siap di belakangku, topiknya pakai ${this.modelName}. Silakan bicara.`
+          : `Halo, Claude siap dengan model ${this.modelName}. Untuk ganti, bilang pakai Opus atau pakai Haiku, atau tekan tombol di chat.`,
       );
     } catch (err) {
       console.error('[bot] Gagal masuk voice channel:', err.message);
@@ -196,7 +196,35 @@ export class Assistant {
 
   // ---- input ----------------------------------------------------------
 
+  /** Someone spoke: Gemini hears the audio (Whisper if Gemini is unavailable). */
+  async #onAudio(mono, from) {
+    const isOwner = from.id === config.ownerUserId;
+    const name = from.name || (isOwner ? 'Pemilik' : 'Tamu');
+    this.pendingConverse += 1;
+    let result;
+    try {
+      result = frontEnabled ? await this.#converse({ mono, name, isOwner }) : null;
+      if (!result) result = { heard: await transcribe(mono, { quick: true }), say: '', forward: null, fallback: true };
+    } catch (err) {
+      console.error('[bot] STT gagal:', err.message);
+      return;
+    } finally {
+      this.pendingConverse -= 1;
+    }
+    await this.#process(result, 'voice', { ...from, name, isOwner });
+  }
+
+  async #converse(input) {
+    try {
+      return await converse(input);
+    } catch (err) {
+      console.error('[gemini] gagal, pakai cadangan:', err.message);
+      return null;
+    }
+  }
+
   /**
+   * Typed text, or what followed the wake word.
    * @param {string} text
    * @param {'voice'|'text'} source
    * @param {{id?: string, name?: string}} [from] who said it (default: the owner)
@@ -204,14 +232,34 @@ export class Assistant {
   async handleInput(text, source, from = {}) {
     const clean = text.trim();
     if (!clean) return;
-    if (from.id && from.id !== config.ownerUserId) {
+    const isOwner = !from.id || from.id === config.ownerUserId;
+    const name = from.name || (isOwner ? 'Pemilik' : 'Tamu');
+    this.pendingConverse += 1;
+    let result;
+    try {
+      result = frontEnabled ? await this.#converse({ text: clean, name, isOwner }) : null;
+    } finally {
+      this.pendingConverse -= 1;
+    }
+    if (!result || !result.heard) result = { heard: clean, say: result?.say ?? '', forward: result?.forward ?? null, fallback: !result };
+    await this.#process(result, source, { ...from, name, isOwner });
+  }
+
+  /**
+   * Act on what was said. result: { heard, say, forward, fallback }.
+   * fallback = Gemini was unavailable (Whisper heard it, nobody answered yet).
+   */
+  async #process({ heard, say, forward, fallback }, source, { name, isOwner }) {
+    const clean = String(heard ?? '').trim();
+    if (!clean) return;
+    if (source === 'voice') this.log(`🎙️ **${isOwner ? 'Kamu' : name}:** ${clean}`);
+
+    if (!isOwner) {
       // Guests only get to chat. Commands, approvals and tools are the owner's.
-      const name = from.name || 'Tamu';
-      if (source === 'voice') this.log(`🎙️ **${name}:** ${clean}`);
-      this.guests.send(clean, name);
+      if (fallback) this.guests.send(clean, name);
+      else if (say) this.#geminiSays(say, name);
       return;
     }
-    if (source === 'voice') this.log(`🎙️ **Kamu:** ${clean}`);
 
     if (this.approval) {
       const answer = parseYesNo(clean);
@@ -265,12 +313,41 @@ export class Assistant {
       return;
     }
 
-    if (this.claude === this.local) {
-      this.local.send(clean); // the head acknowledges once it has picked a topic
-      return;
+    if (say) this.#geminiSays(say);
+    const request = fallback ? clean : forward;
+    if (!request) return;
+    this.log(`➡️ Ke ${this.claude === this.local ? 'Claude' : `Claude di ${config.serverName}`}: ${request}`);
+    if (fallback && this.inCall) {
+      this.voice.speak(this.claude === this.local ? 'Oke, saya teruskan ke Claude.' : `Oke, saya teruskan ke ${config.serverName}.`);
     }
-    if (source === 'voice') this.voice?.speak(`Oke, saya teruskan ke ${config.serverName}.`);
-    await this.claude.send(clean);
+    if (this.claude === this.local) this.local.send(request);
+    else await this.claude.send(request);
+  }
+
+  /** Gemini's own reply to what someone just said: spoken first. */
+  #geminiSays(text, toName) {
+    this.log(`🟦 **Gemini${toName ? ` → ${toName}` : ''}:** ${text}`);
+    if (this.inCall) this.voice.speak(text, { priority: 0 });
+  }
+
+  /**
+   * A message from Claude (or another session) for the owner: the full text
+   * goes to the chat; Gemini says it in its own words, after anything that
+   * answers what someone just said.
+   */
+  async relay(source, text, chatLabel) {
+    this.log(`🤖 **[${chatLabel}]** ${text}`);
+    if (!this.inCall) return;
+    let spoken = `${source}: ${text}`;
+    if (frontEnabled) {
+      try {
+        spoken = await relay(source, text);
+        this.log(`🟦 **Gemini:** ${spoken}`);
+      } catch (err) {
+        console.error('[gemini] relay gagal, dibacakan langsung:', err.message);
+      }
+    }
+    if (this.inCall) this.voice.speak(spoken, { priority: 1 });
   }
 
   // ---- output ---------------------------------------------------------

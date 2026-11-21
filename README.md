@@ -14,14 +14,18 @@ HP (Discord)  ◀──suara──  Edge TTS (text-to-speech, suara Indonesia)
 ```
 
 - Bot otomatis masuk ke voice channel saat kamu masuk, dan keluar saat kamu keluar.
-- **Akses penuh hanya untukmu** (`OWNER_USER_ID`). Teman yang ikut masuk voice channel yang sama juga bisa ngobrol dengan Claude (lewat suara atau ketik di chat), tapi hanya sebagai teman ngobrol: sesi tamu tidak punya tool sama sekali (tidak bisa membuka file, menjalankan perintah, mengakses laptop/server, MCP, atau mengirim pesan). Perintah khusus (stop, reset, ganti model, pindah ke server, jawaban izin, tombol) hanya berlaku untukmu. Jawaban untuk tamu diawali "Untuk <nama>". Pemakaian tamu tetap memakai langgananmu. Bot ikut masuk dan keluar mengikuti kamu, bukan tamu.
+- **Akses penuh hanya untukmu** (`OWNER_USER_ID`). Teman yang ikut masuk voice channel yang sama juga bisa ngobrol (lewat suara atau ketik di chat), tapi hanya dijawab Gemini dan tidak pernah diteruskan ke Claude. Kalau Gemini tidak tersedia, mereka dijawab sesi Claude tamu yang tidak punya tool sama sekali (tidak bisa membuka file, menjalankan perintah, mengakses laptop/server, MCP, atau mengirim pesan). Perintah khusus (stop, reset, ganti model, pindah ke server, jawaban izin, tombol) hanya berlaku untukmu. Jawaban untuk tamu diawali "Untuk <nama>". Pemakaian tamu tetap memakai langgananmu. Bot ikut masuk dan keluar mengikuti kamu, bukan tamu.
 - Transkrip, jawaban lengkap, dan tool yang dipakai Claude juga dikirim sebagai teks ke channel chat. Kamu juga bisa mengetik perintah di sana kalau sedang tidak bisa bicara.
 - Secara default (`PERMISSION_MODE=bypass`) Claude menjalankan **semua** perintah di folder mana pun tanpa bertanya. Kalau mau aksi berisiko diizinkan dulu (lewat suara "ya"/"tidak" atau tombol di chat), isi `PERMISSION_MODE=confirm`.
 - Claude memakai setup Claude Code kamu: skill, plugin, MCP server, `CLAUDE.md`, dan pengaturan di `~/.claude`.
 - Claude bisa menghubungi sesi Claude kamu yang lain (sesi lain di laptop, atau komputer/server yang menjalankan `claude rc`) lewat tool `ListAgents` dan `SendMessage`.
-- **Kerja paralel per topik:** "kepala" (model cepat) memilah tiap ucapan: lanjutan topik yang ada, atau topik baru. Topik baru dikerjakan oleh sesi Claude terpisah yang jalan bersamaan, jadi pertanyaan baru tidak menunggu pekerjaan lain. Begitu satu topik selesai, jawabannya langsung dibacakan dengan awalan "Soal <topik>". Ucapkan "status" untuk mendengar topik yang masih dikerjakan.
+- **Kamu bicara dengan Gemini, Claude bekerja di belakang:**
+  1. **Gemini** (lewat Gemini CLI, langgananmu) mendengar suaramu langsung, menjawab duluan, dan meneruskan permintaan pekerjaan ke Claude.
+  2. **Claude sesi utama** (Sonnet, orkestrator) menerima permintaan dari Gemini, menjawab sendiri atau membuka **sesi topik** di bawahnya yang jalan paralel.
+  3. Hasil sesi topik dilaporkan ke sesi utama, dirangkum, lalu dikirim ke Gemini yang menyampaikannya ke kamu.
+  Urutan suara: balasan Gemini untuk ucapanmu selalu duluan (menyela di antara kalimat), kabar dari Claude menunggu sampai tidak ada yang bicara. Teks lengkap jawaban Claude tetap ada di chat. Ucapkan "status" untuk mendengar topik yang masih dikerjakan. Kalau Gemini tidak tersedia, bot kembali ke Whisper dan meneruskan ucapanmu langsung ke Claude.
 - **Kontrol desktop yang dicek:** Claude membuka aplikasi lewat `scripts/open-app.ps1` (menunggu jendela muncul dan membawanya ke depan), lalu memastikan lewat screenshot (`scripts/screenshot.ps1`). Kalau belum tampil, Claude mengklik ikonnya di taskbar (`scripts/click.ps1`).
-- Saat bot sedang bicara, suaramu tidak dijadikan perintah, jadi jawabannya dibacakan sampai selesai. Satu-satunya pengecualian: bilang **"hey Claude"**. Bot langsung berhenti bicara (antrean bacaan dibuang, teksnya tetap ada di chat) dan mendengarkanmu. Kalimat setelah "hey Claude" langsung dianggap perintah, misalnya "hey Claude, berhenti dulu".
+- Saat bot sedang bicara, suaramu tidak dijadikan perintah, jadi jawabannya dibacakan sampai selesai. Satu-satunya pengecualian: bilang **"hey Gemini"** atau **"hey Claude"**. Bot langsung berhenti bicara (antrean bacaan dibuang, teksnya tetap ada di chat) dan mendengarkanmu. Kalimat setelah "hey Claude" langsung dianggap perintah, misalnya "hey Claude, berhenti dulu".
 - **Tutup panggilan = semua berhenti:** semua sesi Claude yang dibuat bot ditandai `ClaudeCall · <topik>`. Saat kamu keluar dari voice channel (setelah jeda 15 detik), bot mematikan semua sesi itu beserta proses latar belakangnya. Sesi Claude lain milikmu (misalnya di server) tidak disentuh.
 - **Skill `claude-call`** ([`plugin/skills/claude-call/SKILL.md`](plugin/skills/claude-call/SKILL.md)) dimuat di setiap sesi bot: gaya jawaban lisan, kerja kode diserahkan sepenuhnya tanpa izin, dan aksi seperti mengirim pesan, email, posting, atau mematikan laptop wajib kamu izinkan dulu. Izin ini ditegakkan oleh hook di bot (bukan hanya instruksi), juga di mode `bypass`: bot membacakan apa yang akan dikirim, lalu kamu jawab "ya" atau "tidak".
 - **Pilih model:** saat panggilan mulai, bot mengirim tombol Sonnet / Opus / Haiku ke chat (default Sonnet). Bisa juga lewat suara: "pakai Opus", "ganti ke Sonnet", "model Haiku". Model berlaku untuk semua topik, termasuk yang sedang berjalan.
@@ -79,7 +83,7 @@ Perintah suara khusus:
 
 | Ucapkan | Hasil |
 |---|---|
-| "hey Claude" (saat bot bicara) | Memotong bacaan, lalu bot mendengarkan |
+| "hey Gemini" / "hey Claude" (saat bot bicara) | Memotong bacaan, lalu bot mendengarkan |
 | "stop" / "berhenti" | Menghentikan semua pekerjaan Claude yang sedang berjalan (bacaan tetap diselesaikan) |
 | "pakai Opus" / "pakai Sonnet" / "pakai Haiku" | Ganti model Claude |
 | "status" / "lagi ngerjain apa" | Menyebutkan topik yang masih dikerjakan |
@@ -126,7 +130,7 @@ Pemakaian lewat bot ini mengambil jatah langganan Claude yang sama dengan Claude
 | `PERMISSION_MODE` | `bypass` | `bypass` = tanpa konfirmasi, `confirm` = aksi berisiko diizinkan dulu |
 | `REMOTE_CONTROL` | `true` | Nyalakan Remote Control untuk sesi bot, supaya bisa mengirim pesan ke sesi Claude lain |
 | `CLAUDE_MODEL` | `claude-sonnet-5-5` | Model awal untuk worker (bisa diganti saat panggilan) |
-| `ROUTER_MODEL` | `claude-haiku-5-5` | Model cepat untuk "kepala" yang memilah topik |
+| `ORCHESTRATOR_MODEL` | `claude-sonnet-5-5` | Model sesi utama Claude yang menerima permintaan dari Gemini dan membuka sesi topik |
 | `MAX_TOPICS` | `4` | Jumlah maksimal topik yang dikerjakan paralel |
 | `WORKSPACE_DIR` | `~/claude-workspace` | Folder kerja Claude |
 | `TEXT_CHANNEL_ID` | chat di voice channel | Channel untuk transkrip dan tombol izin |

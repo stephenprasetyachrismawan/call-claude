@@ -8,7 +8,7 @@ import { config } from './config.js';
 import { monoToWav } from './audio.js';
 import { GeminiAcp } from './gemini-acp.js';
 
-const gemini = config.sttProvider === 'gemini' ? new GeminiAcp() : null;
+export const gemini = config.sttProvider === 'gemini' ? new GeminiAcp() : null;
 let geminiFailures = 0;
 let geminiPausedUntil = 0;
 

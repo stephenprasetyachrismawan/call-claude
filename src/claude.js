@@ -140,7 +140,11 @@ export function claudeEnv() {
  *   requestApproval({ toolName, reason, summary }) => Promise<boolean>
  */
 export class ClaudeSession {
-  constructor(handlers, model = config.claudeModel, title = 'ClaudeCall') {
+  /**
+   * @param {object} [extra] { prompt: extra system prompt text, mcpServers: in-process MCP servers }
+   */
+  constructor(handlers, model = config.claudeModel, title = 'ClaudeCall', extra = {}) {
+    this.extra = extra;
     this.handlers = handlers;
     this.model = model;
     this.title = title;
@@ -206,6 +210,7 @@ export class ClaudeSession {
           return child;
         },
         plugins: [{ type: 'local', path: PLUGIN_DIR }],
+        ...(this.extra.mcpServers ? { mcpServers: this.extra.mcpServers } : {}),
         hooks: {
           // Sending messages, posting, email, shutdown: ask the owner first, even in bypass mode.
           PreToolUse: [{ hooks: [(input, _id, { signal }) => this.#consentHook(input, signal)], timeout: config.confirmTimeoutS + 30 }],
@@ -218,7 +223,11 @@ export class ClaudeSession {
         // Start Remote Control for this session so SendMessage can reach the
         // owner's sessions on other machines (e.g. a server running `claude rc`).
         settings: { remoteControlAtStartup: config.remoteControl },
-        systemPrompt: { type: 'preset', preset: 'claude_code', append: VOICE_PROMPT },
+        systemPrompt: {
+          type: 'preset',
+          preset: 'claude_code',
+          append: this.extra.prompt ? `${VOICE_PROMPT}\n\n${this.extra.prompt}` : VOICE_PROMPT,
+        },
         ...(config.permissionMode === 'confirm'
           ? {
               permissionMode: 'default',

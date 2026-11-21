@@ -121,6 +121,8 @@ test('wake word', async () => {
   assert.deepEqual(parseWakeWord('Highclot, berhenti dulu.'), { rest: 'berhenti dulu.' });
   assert.deepEqual(parseWakeWord('Hey Klot!'), { rest: '' });
   assert.equal(parseWakeWord('Coba buka klub kot.'), null);
+  assert.deepEqual(parseWakeWord('Hei Gemini, tunggu.'), { rest: 'tunggu.' });
+  assert.deepEqual(parseWakeWord('hey jemini'), { rest: '' });
   assert.equal(parseWakeWord('buka claude code'), null);
   assert.equal(parseWakeWord('terus hey claude'), null);
 });
