@@ -60,7 +60,14 @@ npm start
 
 Kalau berhasil, akan muncul `[bot] Login sebagai ...` dan `[stt] Model siap ...`.
 
-Speech-to-text berjalan **di laptop sendiri** (Whisper lewat transformers.js), jadi tidak perlu API key dan suaramu tidak dikirim ke layanan lain. Saat pertama kali dijalankan, model Whisper (sekitar 250 MB untuk `whisper-small`) diunduh sekali ke folder `models/`.
+**Speech-to-text** memakai **Gemini CLI** yang login dengan akun Google-mu (langganan Gemini, tanpa API key). Instal dan login sekali:
+```powershell
+npm install -g @google/gemini-cli
+gemini        # pilih "Sign in with Google", selesaikan di browser, lalu /quit
+```
+Bot menjalankan satu proses `gemini --acp` yang tetap hidup dan mengirim tiap kalimatmu sebagai audio. Kalau Gemini gagal atau limitnya habis, bot otomatis memakai **Whisper lokal** (transformers.js, model sekitar 250 MB diunduh sekali ke `models/`). Pengecekan "hey Claude" saat bot bicara selalu memakai Whisper lokal supaya cepat. Isi `STT_PROVIDER=whisper` untuk memakai Whisper saja.
+
+**Text-to-speech** memakai Edge TTS (gratis, tanpa key). Gemini CLI hanya bisa membalas teks, jadi tidak bisa dipakai untuk suara keluar.
 
 ## Cara pakai dari HP
 
@@ -123,6 +130,9 @@ Pemakaian lewat bot ini mengambil jatah langganan Claude yang sama dengan Claude
 | `MAX_TOPICS` | `4` | Jumlah maksimal topik yang dikerjakan paralel |
 | `WORKSPACE_DIR` | `~/claude-workspace` | Folder kerja Claude |
 | `TEXT_CHANNEL_ID` | chat di voice channel | Channel untuk transkrip dan tombol izin |
+| `STT_PROVIDER` | `gemini` | `gemini` = Gemini CLI (cadangan Whisper), `whisper` = Whisper lokal saja |
+| `GEMINI_CLI` | `gemini` | Perintah atau path Gemini CLI |
+| `GEMINI_MODEL` | (default CLI) | Model Gemini untuk transkripsi, misalnya model Flash supaya cepat |
 | `STT_LANGUAGE` | `id` | Bahasa yang kamu ucapkan |
 | `STT_MODEL` | `onnx-community/whisper-small` | Model Whisper lokal. `onnx-community/whisper-large-v3-turbo` lebih akurat tapi lebih lambat dan unduhannya sekitar 1 GB |
 | `TTS_VOICE` | `id-ID-GadisNeural` | Suara pembaca (pria: `id-ID-ArdiNeural`) |
