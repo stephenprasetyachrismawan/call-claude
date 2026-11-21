@@ -161,7 +161,7 @@ export function parseModelCommand(text) {
 // ---- wake word ----------------------------------------------------------
 
 // Whisper hears "Claude" in many ways in Indonesian speech.
-const WAKE = /^\W*(?:hey|hei|hai|hay|he|eh|halo|oi|oy)[\s,.!-]*(?:claude|clode|claud|klod|klot|klaud|klaut|clod|cloud|claw?d|kloud|glod|clot)\b[\s,.!?-]*/i;
+const WAKE = /^\W*(?:hey|hei|hai|hay|high|hi|hy|he|eh|halo|oi|oy)[\s,.!-]*(?:claude|clode|claud|klod|klot|klaud|klaut|clod|cloud|claw?d|kloud|glod|clot)\b[\s,.!?-]*/i;
 
 /**
  * "Hey Claude, buka Chrome" -> { rest: 'buka Chrome' }; "hey claude" -> { rest: '' };
