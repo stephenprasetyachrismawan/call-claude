@@ -37,6 +37,7 @@ export class VoiceLink extends EventEmitter {
     this.speechChain = Promise.resolve();
     this.speechGeneration = 0;
     this.pendingSpeech = 0; // queued or playing TTS clips
+    this.speechEndedAt = 0;
 
   }
 
@@ -81,7 +82,10 @@ export class VoiceLink extends EventEmitter {
 
   /** True while an answer is queued or being read aloud. */
   get speaking() {
-    return this.pendingSpeech > 0 || this.player.state.status !== AudioPlayerStatus.Idle;
+    if (this.pendingSpeech > 0) return true;
+    if (this.player.state.status !== AudioPlayerStatus.Idle) return true;
+    // Short tail so the end of our own speech (or its echo) isn't picked up.
+    return Date.now() - this.speechEndedAt < 400;
   }
 
   /** Stop current and queued speech. */
@@ -110,7 +114,8 @@ export class VoiceLink extends EventEmitter {
       })
       .catch((err) => console.error('[voice] TTS error:', err.message))
       .finally(() => {
-        this.pendingSpeech -= 1;
+        this.pendingSpeech = Math.max(0, this.pendingSpeech - 1);
+        this.speechEndedAt = Date.now();
       });
     return this.speechChain;
   }
