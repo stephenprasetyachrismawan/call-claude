@@ -49,7 +49,11 @@ export class VoiceLink extends EventEmitter {
     });
     this.player.on('error', (err) => console.error('[voice] player error:', err.message));
     this.recording = new Set(); // user ids being recorded right now
-    this.speechChain = Promise.resolve();
+    this.items = []; // queued answers (see speak)
+    this.seq = 0;
+    this.pumping = false;
+    this.talking = false;
+    this.holdLow = null; // () => boolean, set by the assistant
     this.pendingSpeech = 0; // queued or playing answers
     this.speechEndedAt = 0;
     this.closed = false;
@@ -101,51 +105,76 @@ export class VoiceLink extends EventEmitter {
     this.connection = null;
   }
 
-  /** True while an answer is queued or being read aloud (plus a short tail). */
+  /** True while the bot is (about to be) talking, plus a short tail. */
   get speaking() {
-    if (this.pendingSpeech > 0) return true;
+    if (this.talking) return true;
     if (this.player.state.status !== AudioPlayerStatus.Idle) return true;
     return Date.now() - this.speechEndedAt < LISTEN_AFTER_SPEECH_MS;
   }
 
   /**
-   * Queue text to be spoken. Long text is split into sentences; the next
-   * piece is synthesized while the current one plays. Resolves when done.
+   * Queue text to be spoken. Resolves when it has been read (or dropped).
+   * priority 0 = reply to what someone just said (goes first, between
+   * sentences of anything already playing); 1 = news from Claude or another
+   * session (waits while someone is talking or being answered, see holdLow).
+   * Long text is split into sentences; the next pieces are synthesized while
+   * the current one plays. A sentence is never cut off, except by the wake word.
    */
-  speak(text) {
+  speak(text, { priority = 0 } = {}) {
     const pieces = splitForSpeech(toSpeakable(text));
     if (!pieces.length || this.closed) return Promise.resolve();
-    const epoch = this.epoch;
-    this.pendingSpeech += 1;
-    this.speechChain = this.speechChain
-      .then(async () => {
-        // Fetch up to PREFETCH pieces ahead while the current one plays.
-        const PREFETCH = 2;
-        const clips = [];
-        const fetchUpTo = (n) => {
-          for (let j = clips.length; j < Math.min(n, pieces.length); j++) clips.push(this.#synth(pieces[j]));
-        };
-        for (let i = 0; i < pieces.length; i++) {
-          fetchUpTo(i + 1 + PREFETCH);
-          if (epoch !== this.epoch) return;
-          const audio = await clips[i];
-          if (this.closed || !this.connection || epoch !== this.epoch) return;
-          if (audio?.length) await this.#play(audio);
-        }
-      })
-      .catch((err) => console.error('[voice] TTS error:', err.message))
-      .finally(() => {
-        this.pendingSpeech = Math.max(0, this.pendingSpeech - 1);
-        // After "hey Claude" listen right away; otherwise keep the short tail.
-        this.speechEndedAt = epoch === this.epoch ? Date.now() : 0;
-      });
-    return this.speechChain;
+    return new Promise((resolve) => {
+      this.items.push({ pieces, clips: [], idx: 0, priority, epoch: this.epoch, seq: this.seq++, resolve, queuedAt: Date.now() });
+      this.pendingSpeech += 1;
+      this.#pump();
+    });
   }
 
-  /** "Hey Claude": stop the current clip and drop everything queued. */
+  #finish(item) {
+    const i = this.items.indexOf(item);
+    if (i >= 0) this.items.splice(i, 1);
+    this.pendingSpeech = Math.max(0, this.pendingSpeech - 1);
+    item.resolve();
+  }
+
+  async #pump() {
+    if (this.pumping) return;
+    this.pumping = true;
+    try {
+      for (;;) {
+        for (const item of [...this.items]) if (item.epoch !== this.epoch || this.closed) this.#finish(item);
+        if (!this.items.length || !this.connection) break;
+        const item = [...this.items].sort((a, b) => a.priority - b.priority || a.seq - b.seq)[0];
+        // News waits while someone is talking or being answered (max 30 s).
+        if (item.priority > 0 && item.idx === 0 && this.holdLow?.() && Date.now() - item.queuedAt < 30_000) {
+          await new Promise((r) => setTimeout(r, 300));
+          continue;
+        }
+        this.talking = true;
+        for (let j = item.clips.length; j < Math.min(item.idx + 3, item.pieces.length); j++) {
+          item.clips.push(this.#synth(item.pieces[j]));
+        }
+        const audio = await item.clips[item.idx];
+        if (item.epoch === this.epoch && !this.closed && this.connection && audio?.length) await this.#play(audio);
+        this.speechEndedAt = item.epoch === this.epoch ? Date.now() : 0;
+        item.idx += 1;
+        if (item.idx >= item.pieces.length) this.#finish(item);
+        this.talking = this.items.some((x) => x.idx > 0); // mid-answer: keep the floor
+      }
+    } catch (err) {
+      console.error('[voice] TTS error:', err.message);
+    } finally {
+      this.talking = false;
+      this.pumping = false;
+    }
+  }
+
+  /** Wake word: stop the current clip and drop everything queued. */
   interruptSpeech() {
     this.epoch += 1;
     this.player.stop(true);
+    this.speechEndedAt = 0;
+    this.#pump();
   }
 
   async #synth(text) {
@@ -224,21 +253,18 @@ export class VoiceLink extends EventEmitter {
     if (pcmDurationSeconds(pcm) < MIN_UTTERANCE_S) return;
     const mono = toMono16k(pcm);
     if (rms(mono) < MIN_LOUDNESS) return;
-    const text = await transcribe(mono);
-    if (!text) return;
-    const wake = parseWakeWord(text);
-    if (wakeOnly) {
-      if (!wake) return; // no "hey Claude": let the bot keep talking
-      console.log('[voice] Wake word, bacaan dihentikan');
-      this.interruptSpeech();
-      this.emit('wake', userId);
-      if (wake.rest) this.emit('utterance', wake.rest, userId);
+    if (!wakeOnly) {
+      // The assistant decides who hears it (Gemini, or Whisper as fallback).
+      this.emit('audio', mono, userId);
       return;
     }
-    if (wake) {
-      if (wake.rest) this.emit('utterance', wake.rest, userId);
-      return; // a bare "hey Claude" when nothing is playing needs no answer
-    }
-    this.emit('utterance', text, userId);
+    // While speaking, only the wake word counts (checked locally with Whisper).
+    const text = await transcribe(mono, { quick: true });
+    const wake = text ? parseWakeWord(text) : null;
+    if (!wake) return; // no wake word: let the bot keep talking
+    console.log('[voice] Wake word, bacaan dihentikan');
+    this.interruptSpeech();
+    this.emit('wake', userId);
+    if (wake.rest) this.emit('utterance', wake.rest, userId);
   }
 }

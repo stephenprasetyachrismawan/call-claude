@@ -3,7 +3,7 @@ import { generateDependencyReport } from '@discordjs/voice';
 import fs from 'node:fs';
 import { config } from './config.js';
 import { Assistant } from './assistant.js';
-import { initStt } from './stt.js';
+import { initGemini, initStt, stopGemini } from './stt.js';
 
 fs.mkdirSync(config.workspaceDir, { recursive: true });
 
@@ -20,6 +20,7 @@ const assistant = new Assistant(client);
 
 // Start loading Whisper right away so it is ready by the first call.
 initStt().catch((err) => console.error('[stt] Gagal memuat model:', err.message));
+initGemini();
 const isOwner = (userId) => userId === config.ownerUserId;
 
 client.once(Events.ClientReady, async (c) => {
@@ -104,6 +105,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 for (const signal of ['SIGINT', 'SIGTERM']) {
   process.on(signal, () => {
     assistant.disconnect(); // also kills every ClaudeCall session
+    stopGemini();
     client.destroy();
     process.exit(0);
   });

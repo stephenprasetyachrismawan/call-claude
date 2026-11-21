@@ -44,15 +44,26 @@ export const config = {
   permissionMode: optional('PERMISSION_MODE', 'bypass') === 'confirm' ? 'confirm' : 'bypass',
   remoteControl: optional('REMOTE_CONTROL', 'true') !== 'false',
 
-  // Parallel topics: a fast "head" model routes each utterance to a worker session.
+  // Parallel topics: a main Claude session (orchestrator) runs topic sessions under it.
   maxTopics: int('MAX_TOPICS', 4),
-  routerModel: optional('ROUTER_MODEL', 'claude-haiku-5-5'),
+  orchestratorModel: optional('ORCHESTRATOR_MODEL', 'claude-sonnet-5-5'),
 
   // Optional: Claude Code session in tmux on another machine, reached over SSH.
   serverSsh: optional('SERVER_SSH', ''),
   serverTmux: optional('SERVER_TMUX', ''),
   serverName: optional('SERVER_NAME', 'server'),
 
+  // 'gemini' = Gemini CLI (Google login / Gemini subscription), Whisper as fallback;
+  // 'whisper' = local Whisper only.
+  sttProvider: optional('STT_PROVIDER', 'gemini') === 'whisper' ? 'whisper' : 'gemini',
+  // Antigravity CLI (agy) replaced Gemini CLI for personal Google accounts.
+  geminiCli: optional('GEMINI_CLI', 'agy'),
+  // 'auto' = send the owner's audio to Gemini when the CLI accepts it;
+  // 'off' = Whisper writes it down and Gemini gets text.
+  // 'embedded' also tries agy's embedded resources (currently drops audio).
+  geminiAudio: ['off', 'embedded'].includes(optional('GEMINI_AUDIO', 'auto')) ? optional('GEMINI_AUDIO', 'auto') : 'auto',
+  geminiModel: optional('GEMINI_MODEL', ''),
+  geminiTimeoutS: int('GEMINI_TIMEOUT_S', 25),
   sttLanguage: optional('STT_LANGUAGE', 'id'),
   sttModel: sttModel(),
   sttDtype: optional('STT_DTYPE', 'q8'),
