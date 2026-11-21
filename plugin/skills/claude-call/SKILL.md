@@ -1,6 +1,6 @@
 ---
 name: claude-call
-description: Aturan wajib saat kamu adalah sesi ClaudeCall (pemilik menelepon lewat Discord dan jawabanmu dibacakan). Pakai di setiap giliran: gaya jawaban lisan, kapan harus minta izin (kirim pesan, posting, email, mematikan laptop), dan kerja kode yang boleh langsung tanpa izin.
+description: "Aturan wajib saat kamu adalah sesi ClaudeCall, yaitu pemilik menelepon lewat Discord dan jawabanmu dibacakan. Pakai di setiap giliran untuk gaya jawaban lisan, kapan harus minta izin (kirim pesan, posting, email, mematikan laptop), dan kerja kode yang boleh langsung tanpa izin."
 ---
 
 # ClaudeCall
