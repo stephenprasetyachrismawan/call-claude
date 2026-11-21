@@ -115,3 +115,15 @@ const RESET_COMMAND = /^\s*(reset|mulai (dari )?(awal|baru)|percakapan baru|lupa
 export function isResetCommand(text) {
   return RESET_COMMAND.test(String(text ?? ''));
 }
+
+const TO_SERVER = /\b(sambung(kan)?|hubung(kan)?|pindah|ganti|connect|switch)\b.*\b(ke|to)\b.*\bserver\b/i;
+const TO_LAPTOP = /\b(kembali|balik|pindah|ganti|sambung(kan)?|back|switch)\b.*\b(ke|to)\b.*\b(laptop|lokal|local)\b/i;
+
+/** 'server' | 'laptop' when the owner asks to switch which Claude they talk to. */
+export function parseSwitchCommand(text) {
+  const t = String(text ?? '');
+  if (t.length > 80) return null;
+  if (TO_LAPTOP.test(t)) return 'laptop';
+  if (TO_SERVER.test(t)) return 'server';
+  return null;
+}

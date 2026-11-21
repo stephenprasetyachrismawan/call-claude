@@ -2,8 +2,9 @@ import { randomUUID } from 'node:crypto';
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
 import { config } from './config.js';
 import { ClaudeSession } from './claude.js';
+import { RemoteSession } from './remote.js';
 import { VoiceLink } from './voice.js';
-import { isResetCommand, isStopCommand, parseYesNo } from './safety.js';
+import { isResetCommand, isStopCommand, parseSwitchCommand, parseYesNo } from './safety.js';
 
 const DISCORD_LIMIT = 1900;
 
@@ -30,12 +31,16 @@ export class Assistant {
     this.voice = null;
     this.textChannel = null;
     this.approval = null; // { id, resolve, message, timer }
-    this.claude = new ClaudeSession({
-      onText: (text) => this.say(text),
+    const handlers = (label) => ({
+      onText: (text) => this.say(label ? `${label}: ${text}` : text, text),
       onError: (message) => this.say(message),
-      onToolUse: (name, summary) => this.log(`🔧 \`${name}\` ${summary ? `— ${summary.replace(/`/g, "'")}` : ''}`),
+      onToolUse: (name, summary) =>
+        this.log(`🔧 ${label ? `[${label}] ` : ''}\`${name}\` ${summary ? `— ${String(summary).replace(/`/g, "'")}` : ''}`),
       requestApproval: (req) => this.requestApproval(req),
     });
+    this.local = new ClaudeSession(handlers(''));
+    this.remote = config.serverSsh && config.serverTmux ? new RemoteSession(handlers(`[${config.serverName}]`)) : null;
+    this.claude = this.local; // the session the owner is currently talking to
   }
 
   get inCall() {
@@ -79,7 +84,7 @@ export class Assistant {
       console.log('[bot] Keluar dari voice channel');
     }
     this.#settleApproval(false, 'panggilan berakhir');
-    if (!keepConversation) this.claude.reset();
+    if (!keepConversation) this.local.reset();
   }
 
   // ---- input ----------------------------------------------------------
@@ -106,6 +111,22 @@ export class Assistant {
       return;
     }
 
+    const target = parseSwitchCommand(clean);
+    if (target === 'server') {
+      if (!this.remote) {
+        await this.say('Server belum diatur. Isi SERVER_SSH dan SERVER_TMUX di file .env.');
+      } else {
+        this.claude = this.remote;
+        await this.say(`Oke, sekarang kamu bicara dengan Claude di ${config.serverName}.`);
+      }
+      return;
+    }
+    if (target === 'laptop') {
+      this.claude = this.local;
+      await this.say('Oke, kembali ke Claude di laptop.');
+      return;
+    }
+
     if (isResetCommand(clean)) {
       this.claude.reset();
       await this.say('Oke, kita mulai percakapan baru.');
@@ -120,9 +141,9 @@ export class Assistant {
   // ---- output ---------------------------------------------------------
 
   /** Post to the text channel and, during a call, read it aloud. */
-  async say(text) {
+  async say(text, spoken = text) {
     this.log(`🤖 ${text}`);
-    if (this.inCall) await this.voice.speak(text);
+    if (this.inCall) await this.voice.speak(spoken);
   }
 
   log(text) {

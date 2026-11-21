@@ -44,6 +44,11 @@ export const config = {
   permissionMode: optional('PERMISSION_MODE', 'bypass') === 'confirm' ? 'confirm' : 'bypass',
   remoteControl: optional('REMOTE_CONTROL', 'true') !== 'false',
 
+  // Optional: Claude Code session in tmux on another machine, reached over SSH.
+  serverSsh: optional('SERVER_SSH', ''),
+  serverTmux: optional('SERVER_TMUX', ''),
+  serverName: optional('SERVER_NAME', 'server'),
+
   sttLanguage: optional('STT_LANGUAGE', 'id'),
   sttModel: sttModel(),
   sttDtype: optional('STT_DTYPE', 'q8'),

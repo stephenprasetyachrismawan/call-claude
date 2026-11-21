@@ -87,3 +87,12 @@ test('stop and reset commands', () => {
   assert.equal(isResetCommand('reset'), true);
   assert.equal(isResetCommand('reset router saya'), false);
 });
+
+test('switch commands between laptop and server', async () => {
+  const { parseSwitchCommand } = await import('../src/safety.js');
+  assert.equal(parseSwitchCommand('Sambungkan ke server.'), 'server');
+  assert.equal(parseSwitchCommand('pindah ke server dong'), 'server');
+  assert.equal(parseSwitchCommand('Kembali ke laptop'), 'laptop');
+  assert.equal(parseSwitchCommand('balik ke lokal'), 'laptop');
+  assert.equal(parseSwitchCommand('cek status server'), null);
+});
