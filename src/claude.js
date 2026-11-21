@@ -1,7 +1,12 @@
 import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import { config } from './config.js';
 import { assessRisk } from './safety.js';
+
+const SCRIPTS = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'scripts');
+const PS = 'powershell -NoProfile -ExecutionPolicy Bypass -File';
 
 const VOICE_PROMPT = `
 Kamu sedang ditelepon oleh pemilik laptop ini lewat voice channel Discord dari HP-nya.
@@ -10,6 +15,13 @@ Kamu sedang ditelepon oleh pemilik laptop ini lewat voice channel Discord dari H
 - Laptop ini memakai Windows. Untuk urusan sistem, pakai PowerShell (misalnya: powershell -NoProfile -Command "...").
 - Folder kerja default: ${config.workspaceDir}
 - Kamu boleh bekerja di folder mana pun di laptop ini.
+- Bisa jadi ada beberapa sesi Claude lain yang bekerja paralel untuk topik lain; fokus pada topikmu sendiri.
+- Mengontrol layar desktop (membuka aplikasi seperti WhatsApp, Chrome, Word, Claude, dll.):
+  1. Selalu buka lewat: ${PS} "${path.join(SCRIPTS, 'open-app.ps1')}" -Name <nama aplikasi> (tambahkan -Launch <exe/URL> kalau perlu). Skrip ini menunggu jendela muncul, membawanya ke depan, lalu melaporkan JSON "ok".
+  2. Jangan anggap aplikasi sudah terbuka hanya karena perintah start berhasil. Kalau "ok" false, atau untuk memastikan, ambil screenshot: ${PS} "${path.join(SCRIPTS, 'screenshot.ps1')}", lalu baca file PNG-nya dengan tool Read dan lihat apakah jendelanya benar-benar tampil.
+  3. Kalau belum tampil, klik ikon aplikasinya di taskbar bawah: cari posisinya di screenshot, lalu ${PS} "${path.join(SCRIPTS, 'click.ps1')}" -X <x> -Y <y> -FromImage. Setelah itu ambil screenshot lagi untuk memastikan.
+  4. Untuk mengetik atau menekan tombol di jendela yang aktif: ${PS} "${path.join(SCRIPTS, 'type.ps1')}" -Text "..." atau -Keys "{ENTER}".
+  Laporkan ke pemilik hanya setelah kamu melihat sendiri di screenshot bahwa aplikasinya terbuka.
 - Pakai skill yang tersedia (tool Skill) setiap kali ada skill yang cocok dengan permintaan.
 - Untuk menghubungi sesi Claude lain milik pemilik (sesi lain di laptop ini, atau sesi Remote Control di komputer/server lain), pakai tool ListAgents untuk melihat daftarnya dan SendMessage untuk mengirim pesan.
 ${config.permissionMode === 'confirm'
@@ -18,7 +30,7 @@ ${config.permissionMode === 'confirm'
 `.trim();
 
 /** Minimal async queue used as the streaming prompt for the Agent SDK. */
-class AsyncQueue {
+export class AsyncQueue {
   #items = [];
   #waiters = [];
   #ended = false;
@@ -47,7 +59,7 @@ class AsyncQueue {
 }
 
 /** Environment for the Claude Code process: always the subscription login, never an API key. */
-function claudeEnv() {
+export function claudeEnv() {
   const env = { ...process.env, CLAUDE_AGENT_SDK_CLIENT_APP: 'call-claude/1.0' };
   delete env.ANTHROPIC_API_KEY;
   delete env.ANTHROPIC_AUTH_TOKEN;

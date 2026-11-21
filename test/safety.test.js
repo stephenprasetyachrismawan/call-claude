@@ -96,3 +96,10 @@ test('switch commands between laptop and server', async () => {
   assert.equal(parseSwitchCommand('balik ke lokal'), 'laptop');
   assert.equal(parseSwitchCommand('cek status server'), null);
 });
+
+test('status command', async () => {
+  const { isStatusCommand } = await import('../src/safety.js');
+  assert.equal(isStatusCommand('Status?'), true);
+  assert.equal(isStatusCommand('lagi ngerjain apa'), true);
+  assert.equal(isStatusCommand('status server bagaimana'), false);
+});

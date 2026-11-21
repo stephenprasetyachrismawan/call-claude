@@ -127,3 +127,10 @@ export function parseSwitchCommand(text) {
   if (TO_SERVER.test(t)) return 'server';
   return null;
 }
+
+const STATUS_COMMAND = /^\s*(status|lagi (ngerjain|mengerjakan|kerja) apa|sedang (mengerjakan|kerja) apa|apa (saja )?yang sedang dikerjakan|progres(nya)?( gimana| bagaimana)?)\b[\s.!?,]*$/i;
+
+/** True when the owner asks what is still being worked on. */
+export function isStatusCommand(text) {
+  return STATUS_COMMAND.test(String(text ?? ''));
+}

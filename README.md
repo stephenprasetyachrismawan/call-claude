@@ -19,6 +19,8 @@ HP (Discord)  ◀──suara──  Edge TTS (text-to-speech, suara Indonesia)
 - Secara default (`PERMISSION_MODE=bypass`) Claude menjalankan **semua** perintah di folder mana pun tanpa bertanya. Kalau mau aksi berisiko diizinkan dulu (lewat suara "ya"/"tidak" atau tombol di chat), isi `PERMISSION_MODE=confirm`.
 - Claude memakai setup Claude Code kamu: skill, plugin, MCP server, `CLAUDE.md`, dan pengaturan di `~/.claude`.
 - Claude bisa menghubungi sesi Claude kamu yang lain (sesi lain di laptop, atau komputer/server yang menjalankan `claude rc`) lewat tool `ListAgents` dan `SendMessage`.
+- **Kerja paralel per topik:** "kepala" (model cepat) memilah tiap ucapan: lanjutan topik yang ada, atau topik baru. Topik baru dikerjakan oleh sesi Claude terpisah yang jalan bersamaan, jadi pertanyaan baru tidak menunggu pekerjaan lain. Begitu satu topik selesai, jawabannya langsung dibacakan dengan awalan "Soal <topik>". Ucapkan "status" untuk mendengar topik yang masih dikerjakan.
+- **Kontrol desktop yang dicek:** Claude membuka aplikasi lewat `scripts/open-app.ps1` (menunggu jendela muncul dan membawanya ke depan), lalu memastikan lewat screenshot (`scripts/screenshot.ps1`). Kalau belum tampil, Claude mengklik ikonnya di taskbar (`scripts/click.ps1`).
 - Saat bot sedang bicara, bot tidak mendengarkan, jadi jawabannya tidak terpotong oleh suaramu. Bot mendengarkan lagi setelah selesai bicara.
 
 ## Yang perlu disiapkan
@@ -66,7 +68,9 @@ Perintah suara khusus:
 
 | Ucapkan | Hasil |
 |---|---|
-| "stop" / "berhenti" | Menghentikan pekerjaan Claude yang sedang berjalan |
+| "stop" / "berhenti" | Menghentikan semua pekerjaan Claude yang sedang berjalan |
+| "status" / "lagi ngerjain apa" | Menyebutkan topik yang masih dikerjakan |
+| "sambungkan ke server" / "kembali ke laptop" | Pindah antara Claude di server (lihat `SERVER_SSH`) dan Claude di laptop |
 | "mulai dari awal" / "reset" | Memulai percakapan baru (Claude lupa konteks sebelumnya) |
 | "ya" / "boleh" / "oke" | Mengizinkan aksi berisiko (hanya di mode `confirm`) |
 | "tidak" / "jangan" / "batal" | Menolak aksi berisiko (hanya di mode `confirm`) |
@@ -108,7 +112,9 @@ Pemakaian lewat bot ini mengambil jatah langganan Claude yang sama dengan Claude
 |---|---|---|
 | `PERMISSION_MODE` | `bypass` | `bypass` = tanpa konfirmasi, `confirm` = aksi berisiko diizinkan dulu |
 | `REMOTE_CONTROL` | `true` | Nyalakan Remote Control untuk sesi bot, supaya bisa mengirim pesan ke sesi Claude lain |
-| `CLAUDE_MODEL` | `claude-opus-5-5` | Model Claude |
+| `CLAUDE_MODEL` | `claude-opus-5-5` | Model Claude untuk worker |
+| `ROUTER_MODEL` | `claude-haiku-5-5` | Model cepat untuk "kepala" yang memilah topik |
+| `MAX_TOPICS` | `4` | Jumlah maksimal topik yang dikerjakan paralel |
 | `WORKSPACE_DIR` | `~/claude-workspace` | Folder kerja Claude |
 | `TEXT_CHANNEL_ID` | chat di voice channel | Channel untuk transkrip dan tombol izin |
 | `STT_LANGUAGE` | `id` | Bahasa yang kamu ucapkan |

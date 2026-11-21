@@ -44,6 +44,10 @@ export const config = {
   permissionMode: optional('PERMISSION_MODE', 'bypass') === 'confirm' ? 'confirm' : 'bypass',
   remoteControl: optional('REMOTE_CONTROL', 'true') !== 'false',
 
+  // Parallel topics: a fast "head" model routes each utterance to a worker session.
+  maxTopics: int('MAX_TOPICS', 4),
+  routerModel: optional('ROUTER_MODEL', 'claude-haiku-5-5'),
+
   // Optional: Claude Code session in tmux on another machine, reached over SSH.
   serverSsh: optional('SERVER_SSH', ''),
   serverTmux: optional('SERVER_TMUX', ''),

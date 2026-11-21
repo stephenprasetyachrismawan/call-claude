@@ -1,10 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
 import { config } from './config.js';
-import { ClaudeSession } from './claude.js';
+import { Orchestrator } from './orchestrator.js';
 import { RemoteSession } from './remote.js';
 import { VoiceLink } from './voice.js';
-import { isResetCommand, isStopCommand, parseSwitchCommand, parseYesNo } from './safety.js';
+import { isResetCommand, isStatusCommand, isStopCommand, parseSwitchCommand, parseYesNo } from './safety.js';
 
 const DISCORD_LIMIT = 1900;
 
@@ -31,6 +31,7 @@ export class Assistant {
     this.voice = null;
     this.textChannel = null;
     this.approval = null; // { id, resolve, message, timer }
+    this.approvalChain = Promise.resolve(); // one approval question at a time
     const handlers = (label) => ({
       onText: (text) => this.say(label ? `${label}: ${text}` : text, text),
       onError: (message) => this.say(message),
@@ -38,7 +39,23 @@ export class Assistant {
         this.log(`🔧 ${label ? `[${label}] ` : ''}\`${name}\` ${summary ? `— ${String(summary).replace(/`/g, "'")}` : ''}`),
       requestApproval: (req) => this.requestApproval(req),
     });
-    this.local = new ClaudeSession(handlers(''));
+    // Laptop: a head that routes each utterance to a parallel worker per topic.
+    this.local = new Orchestrator({
+      onText: (text, label) => this.say(`**[${label}]** ${text}`, `Soal ${label}. ${text}`),
+      onError: (message, label) => this.say(label ? `**[${label}]** ${message}` : message),
+      onToolUse: (name, summary, label) =>
+        this.log(`🔧 [${label}] \`${name}\` ${summary ? `— ${String(summary).replace(/`/g, "'")}` : ''}`),
+      onRouted: (label, isNew, wasBusy) => {
+        const ack = isNew
+          ? `Oke, saya kerjakan soal ${label}.`
+          : wasBusy
+            ? `Oke, saya tambahkan ke soal ${label}.`
+            : `Oke, lanjut soal ${label}.`;
+        this.log(`🧭 ${ack}`);
+        if (this.inCall) this.voice.speak(ack);
+      },
+      requestApproval: (req) => this.requestApproval(req),
+    });
     this.remote = config.serverSsh && config.serverTmux ? new RemoteSession(handlers(`[${config.serverName}]`)) : null;
     this.claude = this.local; // the session the owner is currently talking to
   }
@@ -101,10 +118,16 @@ export class Assistant {
       return;
     }
 
+    if (isStatusCommand(clean)) {
+      const labels = this.claude === this.local ? this.local.busyLabels() : this.claude.busy ? [config.serverName] : [];
+      await this.say(labels.length ? `Sedang dikerjakan: ${labels.join(', ')}.` : 'Tidak ada yang sedang dikerjakan.');
+      return;
+    }
+
     if (isStopCommand(clean)) {
       if (this.claude.busy) {
         await this.claude.interrupt();
-        await this.say('Oke, dihentikan.');
+        await this.say('Oke, semua pekerjaan dihentikan.');
       } else {
         this.voice?.stopSpeaking();
       }
@@ -133,6 +156,10 @@ export class Assistant {
       return;
     }
 
+    if (this.claude === this.local) {
+      this.local.send(clean); // the head acknowledges once it has picked a topic
+      return;
+    }
     const wasBusy = this.claude.busy;
     this.claude.send(clean);
     if (source === 'voice') this.voice?.speak(wasBusy ? 'Oke, nanti saya kerjakan juga.' : 'Sebentar.');
@@ -157,9 +184,15 @@ export class Assistant {
 
   // ---- approvals ------------------------------------------------------
 
-  async requestApproval({ toolName, reason, summary }) {
+  /** Parallel workers may ask at the same time: ask one question at a time. */
+  requestApproval(req) {
+    const next = this.approvalChain.then(() => this.#askApproval(req));
+    this.approvalChain = next.catch(() => {});
+    return next;
+  }
+
+  async #askApproval({ toolName, reason, summary }) {
     if (!this.textChannel && !this.inCall) return false;
-    this.#settleApproval(false, 'diganti permintaan baru');
 
     const id = randomUUID();
     const row = new ActionRowBuilder().addComponents(
