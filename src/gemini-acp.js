@@ -108,7 +108,7 @@ export class GeminiAcp {
     this.embedded = Boolean(init?.agentCapabilities?.promptCapabilities?.embeddedContext);
     await this.#request('authenticate', { methodId: LOGIN_WITH_GOOGLE }, 5 * 60_000);
     await this.#newSession();
-    console.log('[gemini] Speech-to-text lewat Gemini CLI siap.');
+    console.log(`[gemini] Gemini siap (${this.isAgy ? 'Antigravity CLI' : 'Gemini CLI'}, model ${this.model || 'default'}, audio langsung: ${this.audioDirect ? 'ya' : 'tidak, pakai Whisper'}).`);
   }
 
   async #newSession() {
