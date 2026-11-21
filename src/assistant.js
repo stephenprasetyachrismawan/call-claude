@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
 import { config } from './config.js';
 import { Conductor } from './conductor.js';
-import { converse, frontEnabled, relay } from './front.js';
+import { converse, frontEnabled, progress, relay } from './front.js';
 import { transcribe } from './stt.js';
 import path from 'node:path';
 import { RemoteSession, RemoteWatcher } from './remote.js';
@@ -58,10 +58,15 @@ export class Assistant {
     this.local = new Conductor({
       onText: (text, label) => this.relay('Claude', text, label ? `Claude · ${label}` : 'Claude'),
       onError: (message, label) => this.say(label ? `**[${label}]** ${message}` : message),
-      onToolUse: (name, summary, label) =>
-        this.log(`🔧 [${label}] \`${name}\` ${summary ? `— ${String(summary).replace(/`/g, "'")}` : ''}`),
+      onToolUse: (name, summary, label) => {
+        this.#noteActivity(label, name, summary);
+        this.log(`🔧 [${label}] \`${name}\` ${summary ? `— ${String(summary).replace(/`/g, "'")}` : ''}`);
+      },
       requestApproval: (req) => this.requestApproval(req),
     });
+    this.activity = new Map(); // label -> { since, steps: [{ name, summary, at }] }
+    this.lastProgress = { at: 0, text: '', stepAt: 0 };
+    this.progressTimer = null;
     this.pendingConverse = 0; // utterances Gemini is still answering
     this.remote = config.serverSsh && config.serverTmux ? new RemoteSession(handlers(`[${config.serverName}]`)) : null;
     this.claude = this.local; // the session the owner is currently talking to
@@ -161,6 +166,7 @@ export class Assistant {
       await voice.join();
       console.log(`[bot] Masuk ke voice channel ${voiceChannel.name}`);
       this.local.warm();
+      this.#startProgressLoop();
       this.localWatcher.start();
       this.remoteWatcher?.start();
       this.#postModelPicker();
@@ -177,6 +183,8 @@ export class Assistant {
   }
 
   disconnect({ keepConversation = false } = {}) {
+    clearInterval(this.progressTimer);
+    this.progressTimer = null;
     this.localWatcher.stop();
     this.remoteWatcher?.stop();
     if (this.voice) {
@@ -330,6 +338,70 @@ export class Assistant {
   }
 
   /** Gemini's own reply to what someone just said: spoken first. */
+  // ---- progress while the line is quiet --------------------------------
+
+  #noteActivity(label, name, summary) {
+    const key = label || 'utama';
+    const entry = this.activity.get(key) ?? { since: Date.now(), steps: [] };
+    entry.steps.push({ name, summary: String(summary ?? '').slice(0, 160), at: Date.now() });
+    if (entry.steps.length > 4) entry.steps.shift();
+    this.activity.set(key, entry);
+  }
+
+  /** Plain text of what Claude is doing right now, or '' when nothing runs. */
+  #statusText() {
+    if (this.claude !== this.local || !this.local.busy) return '';
+    const busy = new Set(this.local.busyLabels().map((l) => (l === 'sesi utama' ? 'utama' : l)));
+    for (const key of [...this.activity.keys()]) if (!busy.has(key)) this.activity.delete(key);
+    const now = Date.now();
+    return [...busy]
+      .map((label) => {
+        const entry = this.activity.get(label);
+        const name = label === 'utama' ? 'Claude (sesi utama)' : `topik "${label}"`;
+        if (!entry) return `- ${name}: sedang berpikir, belum ada langkah.`;
+        const mins = Math.round((now - entry.since) / 60_000);
+        const steps = entry.steps.map((s) => `${s.name}${s.summary ? ` (${s.summary})` : ''}`).join('; ');
+        return `- ${name}: sudah ${mins < 1 ? 'kurang dari semenit' : `${mins} menit`}, langkah terakhir: ${steps}`;
+      })
+      .join('\n');
+  }
+
+  /** When the line is quiet and Claude is still working, Gemini says what is going on. */
+  #startProgressLoop() {
+    clearInterval(this.progressTimer);
+    this.lastProgress = { at: 0, text: '', stepAt: 0 };
+    if (!frontEnabled || !config.idleProgressS) return;
+    let asking = false;
+    this.progressTimer = setInterval(async () => {
+      const voice = this.voice;
+      if (asking || !voice || this.pendingConverse > 0 || this.approval) return;
+      const quietMs = voice.quietMs;
+      const sinceLast = Date.now() - this.lastProgress.at;
+      if (quietMs < config.idleProgressS * 1000 || sinceLast < config.idleProgressS * 1000) return;
+      const status = this.#statusText();
+      if (!status) return;
+      // Something new happened, or it has been a while: worth an update.
+      const latestStep = Math.max(0, ...[...this.activity.values()].flatMap((e) => e.steps.map((s) => s.at)));
+      const isNew = latestStep > this.lastProgress.stepAt;
+      if (!isNew && sinceLast < 60_000) return;
+      asking = true;
+      const heardBefore = voice.lastHeardAt;
+      try {
+        const text = await progress(status, this.lastProgress.text);
+        this.lastProgress = { at: Date.now(), text: text || this.lastProgress.text, stepAt: latestStep };
+        // Someone spoke meanwhile, or the call changed: drop the update.
+        if (!text || this.voice !== voice || voice.lastHeardAt !== heardBefore || voice.recording.size > 0) return;
+        this.log(`🟦 **Gemini (progres):** ${text}`);
+        voice.speak(text, { priority: 2 });
+      } catch (err) {
+        this.lastProgress.at = Date.now();
+        console.error('[gemini] update progres gagal:', err.message);
+      } finally {
+        asking = false;
+      }
+    }, 2_000);
+  }
+
   #geminiSays(text, toName) {
     this.log(`🟦 **Gemini${toName ? ` → ${toName}` : ''}:** ${text}`);
     if (this.inCall) this.voice.speak(text, { priority: 0 });
