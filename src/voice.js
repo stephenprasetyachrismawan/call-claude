@@ -1,4 +1,5 @@
 import { EventEmitter } from 'node:events';
+import { Readable } from 'node:stream';
 import {
   AudioPlayerStatus,
   EndBehaviorType,
@@ -14,17 +15,22 @@ import prism from 'prism-media';
 import { config } from './config.js';
 import { pcmDurationSeconds, rms, toMono16k } from './audio.js';
 import { transcribe } from './stt.js';
-import { synthesize, toSpeakable } from './tts.js';
+import { splitForSpeech, synthesize, toSpeakable } from './tts.js';
 
 const MIN_UTTERANCE_S = 0.4;
 const MAX_UTTERANCE_S = 60;
 const MIN_LOUDNESS = 0.004;
+// Quiet time after the last clip before listening again, so the end of our
+// own speech (or its echo on the phone) is never picked up as the owner.
+const LISTEN_AFTER_SPEECH_MS = 800;
 
 /**
  * Voice connection to one channel. Listens only to the owner and emits
  * 'utterance' with the transcribed text. speak() reads text aloud.
- * While the bot is speaking it does not listen, so the owner's voice never
- * cuts an answer off; listening resumes once playback has finished.
+ * Speech is strict: every queued answer is read to the end, in order, and
+ * nothing (the owner's voice, a new answer, a "stop") cuts it off. While
+ * anything is queued or playing the bot does not listen; listening resumes
+ * only after the whole queue has finished.
  */
 export class VoiceLink extends EventEmitter {
   constructor(channel) {
@@ -35,10 +41,9 @@ export class VoiceLink extends EventEmitter {
     this.player.on('error', (err) => console.error('[voice] player error:', err.message));
     this.recording = false;
     this.speechChain = Promise.resolve();
-    this.speechGeneration = 0;
-    this.pendingSpeech = 0; // queued or playing TTS clips
+    this.pendingSpeech = 0; // queued or playing answers
     this.speechEndedAt = 0;
-
+    this.closed = false;
   }
 
   async join() {
@@ -71,7 +76,9 @@ export class VoiceLink extends EventEmitter {
   }
 
   leave() {
-    this.stopSpeaking();
+    // The only thing that ends speech early: the call itself is over.
+    this.closed = true;
+    this.player.stop(true);
     try {
       this.connection?.destroy();
     } catch {
@@ -80,37 +87,30 @@ export class VoiceLink extends EventEmitter {
     this.connection = null;
   }
 
-  /** True while an answer is queued or being read aloud. */
+  /** True while an answer is queued or being read aloud (plus a short tail). */
   get speaking() {
     if (this.pendingSpeech > 0) return true;
     if (this.player.state.status !== AudioPlayerStatus.Idle) return true;
-    // Short tail so the end of our own speech (or its echo) isn't picked up.
-    return Date.now() - this.speechEndedAt < 400;
+    return Date.now() - this.speechEndedAt < LISTEN_AFTER_SPEECH_MS;
   }
 
-  /** Stop current and queued speech. */
-  stopSpeaking() {
-    this.speechGeneration += 1;
-    this.player.stop(true);
-  }
-
-  /** Queue text to be spoken. Resolves when it has finished playing. */
+  /**
+   * Queue text to be spoken. Long text is split into sentences; the next
+   * piece is synthesized while the current one plays. Resolves when done.
+   */
   speak(text) {
-    const spoken = toSpeakable(text);
-    if (!spoken) return Promise.resolve();
-    const generation = this.speechGeneration;
+    const pieces = splitForSpeech(toSpeakable(text));
+    if (!pieces.length || this.closed) return Promise.resolve();
     this.pendingSpeech += 1;
     this.speechChain = this.speechChain
       .then(async () => {
-        if (generation !== this.speechGeneration || !this.connection) return;
-        const stream = await synthesize(spoken);
-        if (generation !== this.speechGeneration) {
-          stream.destroy();
-          return;
+        let next = this.#synth(pieces[0]);
+        for (let i = 0; i < pieces.length; i++) {
+          const audio = await next;
+          next = i + 1 < pieces.length ? this.#synth(pieces[i + 1]) : null;
+          if (this.closed || !this.connection) return;
+          if (audio?.length) await this.#play(audio);
         }
-        this.player.play(createAudioResource(stream, { inputType: StreamType.Arbitrary }));
-        await entersState(this.player, AudioPlayerStatus.Playing, 10_000).catch(() => {});
-        await entersState(this.player, AudioPlayerStatus.Idle, 5 * 60_000).catch(() => {});
       })
       .catch((err) => console.error('[voice] TTS error:', err.message))
       .finally(() => {
@@ -120,10 +120,45 @@ export class VoiceLink extends EventEmitter {
     return this.speechChain;
   }
 
+  async #synth(text) {
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        return await synthesize(text);
+      } catch (err) {
+        console.error(`[voice] TTS gagal (percobaan ${attempt}):`, err.message);
+      }
+    }
+    return null;
+  }
+
+  /** Play one complete clip and wait until it has finished. */
+  #play(audio) {
+    return new Promise((resolve) => {
+      let started = false;
+      const finish = () => {
+        clearTimeout(timer);
+        this.player.off('stateChange', onState);
+        resolve();
+      };
+      const onState = (_old, now) => {
+        if (now.status !== AudioPlayerStatus.Idle) started = true;
+        else if (started) finish();
+      };
+      const timer = setTimeout(finish, 5 * 60_000);
+      this.player.on('stateChange', onState);
+      try {
+        this.player.play(createAudioResource(Readable.from([audio]), { inputType: StreamType.Arbitrary }));
+      } catch (err) {
+        console.error('[voice] play error:', err.message);
+        finish();
+      }
+    });
+  }
+
   #listen() {
     if (this.recording || !this.connection) return;
-    // Don't listen while speaking: the owner's voice must not cut the answer off.
-    if (this.speaking) return;
+    // Don't listen while speaking: the whole answer is read first.
+    if (this.closed || this.speaking) return;
     this.recording = true;
 
     const opus = this.connection.receiver.subscribe(config.ownerUserId, {

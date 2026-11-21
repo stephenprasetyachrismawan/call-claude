@@ -1,7 +1,8 @@
 import { MsEdgeTTS, OUTPUT_FORMAT } from 'msedge-tts';
 import { config } from './config.js';
 
-const MAX_SPOKEN_CHARS = 700;
+const MAX_CHUNK_CHARS = 280;
+const SYNTH_TIMEOUT_MS = 45_000;
 
 /** Strip markdown and other things that sound bad when read aloud. */
 export function toSpeakable(text) {
@@ -15,19 +16,75 @@ export function toSpeakable(text) {
     .replace(/^\s*[-•]\s+/gm, '')
     .replace(/\s+/g, ' ')
     .trim();
-  if (t.length > MAX_SPOKEN_CHARS) {
-    const cut = t.lastIndexOf('. ', MAX_SPOKEN_CHARS);
-    t = t.slice(0, cut > 200 ? cut + 1 : MAX_SPOKEN_CHARS) + ' Selengkapnya ada di chat.';
-  }
   return t;
 }
 
-/** Synthesize speech; resolves to a readable MP3 stream. */
+/**
+ * Split speakable text into short pieces at sentence (or clause) boundaries,
+ * so every piece is synthesized and played completely, nothing is cut off.
+ */
+export function splitForSpeech(text, max = MAX_CHUNK_CHARS) {
+  const sentences = String(text).match(/[^.!?…]+[.!?…]*\s*/g) ?? [];
+  const pieces = [];
+  let cur = '';
+  const push = (s) => {
+    s = s.trim();
+    if (s) pieces.push(s);
+  };
+  for (let s of sentences) {
+    // A very long sentence: break at commas, then at spaces.
+    while (s.length > max) {
+      let cut = s.lastIndexOf(', ', max);
+      if (cut < max / 3) cut = s.lastIndexOf(' ', max);
+      if (cut < max / 3) cut = max;
+      push(cur);
+      cur = '';
+      push(s.slice(0, cut + 1));
+      s = s.slice(cut + 1);
+    }
+    if ((cur + s).length > max) {
+      push(cur);
+      cur = s;
+    } else {
+      cur += s;
+    }
+  }
+  push(cur);
+  return pieces;
+}
+
+/**
+ * Synthesize speech into a complete MP3 buffer. The whole clip is downloaded
+ * before playback starts, so a slow network can never end a clip early.
+ */
 export async function synthesize(text) {
   const tts = new MsEdgeTTS();
-  await tts.setMetadata(config.ttsVoice, OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3);
-  const { audioStream } = tts.toStream(text, { rate: config.ttsRate });
-  audioStream.once('close', () => tts.close());
-  audioStream.once('end', () => tts.close());
-  return audioStream;
+  try {
+    await tts.setMetadata(config.ttsVoice, OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3);
+    const { audioStream } = tts.toStream(text, { rate: config.ttsRate });
+    return await new Promise((resolve, reject) => {
+      const chunks = [];
+      const timer = setTimeout(() => {
+        audioStream.destroy();
+        reject(new Error('TTS timeout'));
+      }, SYNTH_TIMEOUT_MS);
+      audioStream.on('data', (c) => chunks.push(c));
+      audioStream.once('error', (err) => {
+        clearTimeout(timer);
+        reject(err);
+      });
+      const done = () => {
+        clearTimeout(timer);
+        resolve(Buffer.concat(chunks));
+      };
+      audioStream.once('end', done);
+      audioStream.once('close', done);
+    });
+  } finally {
+    try {
+      tts.close();
+    } catch {
+      // already closed
+    }
+  }
 }

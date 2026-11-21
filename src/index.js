@@ -41,14 +41,25 @@ client.once(Events.ClientReady, async (c) => {
 });
 
 // Follow the owner: join when they join a voice channel, leave when they leave.
+// A phone on a shaky connection can drop out of the channel for a moment;
+// wait a bit before hanging up so that doesn't cut the call (and speech) off.
+const OWNER_LEAVE_GRACE_MS = 15_000;
+let leaveTimer = null;
+
 client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
   if (newState.guild.id !== config.guildId) return;
 
   if (isOwner(newState.id)) {
-    if (newState.channel && newState.channelId !== oldState.channelId) {
-      await assistant.connect(newState.channel);
-    } else if (!newState.channel) {
-      assistant.disconnect();
+    if (newState.channel) {
+      clearTimeout(leaveTimer);
+      leaveTimer = null;
+      if (newState.channelId !== oldState.channelId) await assistant.connect(newState.channel);
+    } else if (!leaveTimer) {
+      console.log('[bot] Pemilik keluar dari voice, menunggu sebentar sebelum menutup panggilan');
+      leaveTimer = setTimeout(() => {
+        leaveTimer = null;
+        assistant.disconnect();
+      }, OWNER_LEAVE_GRACE_MS);
     }
     return;
   }

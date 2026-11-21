@@ -79,7 +79,13 @@ export class Assistant {
     voice.on('utterance', (text) => this.handleInput(text, 'voice'));
     voice.on('stt-error', () => this.say('Maaf, suaramu gagal diproses. Coba ulangi.'));
     voice.on('closed', () => {
-      if (this.voice === voice) this.voice = null;
+      if (this.voice !== voice) return;
+      this.voice = null;
+      console.log('[bot] Koneksi voice terputus');
+      // Discord dropped us but the owner is still there: join again.
+      setTimeout(() => {
+        if (!this.voice && voiceChannel.members.has(config.ownerUserId)) this.connect(voiceChannel);
+      }, 2_000);
     });
     this.voice = voice;
 
@@ -125,11 +131,12 @@ export class Assistant {
     }
 
     if (isStopCommand(clean)) {
+      // Stops Claude's work. Speech already queued is still read to the end.
       if (this.claude.busy) {
         await this.claude.interrupt();
         await this.say('Oke, semua pekerjaan dihentikan.');
       } else {
-        this.voice?.stopSpeaking();
+        await this.say('Tidak ada pekerjaan yang sedang berjalan.');
       }
       return;
     }
