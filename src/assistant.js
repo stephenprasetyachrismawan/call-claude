@@ -7,6 +7,7 @@ import { RemoteSession, RemoteWatcher } from './remote.js';
 import { VoiceLink } from './voice.js';
 import { LocalSessionWatcher } from './watcher.js';
 import { killAllClaudeCallProcesses } from './claude.js';
+import { GuestChat } from './guest.js';
 import {
   MODELS,
   isResetCommand,
@@ -69,6 +70,11 @@ export class Assistant {
     });
     this.remote = config.serverSsh && config.serverTmux ? new RemoteSession(handlers(`[${config.serverName}]`)) : null;
     this.claude = this.local; // the session the owner is currently talking to
+    // Other people in the voice channel: chat only, no tools, no access.
+    this.guests = new GuestChat({
+      onText: (text, name) => this.say(`**[untuk ${name}]** ${text}`, name ? `Untuk ${name}. ${text}` : text),
+      onError: (message, name) => this.say(name ? `**[untuk ${name}]** ${message}` : message),
+    });
     this.model = Object.keys(MODELS).find((k) => MODELS[k].id === config.claudeModel) ?? null;
 
     // Answers from every other Claude session are read aloud as soon as they exist.
@@ -137,7 +143,9 @@ export class Assistant {
     if (!this.textChannel?.isTextBased()) this.textChannel = voiceChannel;
 
     const voice = new VoiceLink(voiceChannel);
-    voice.on('utterance', (text) => this.handleInput(text, 'voice'));
+    voice.on('utterance', (text, userId) =>
+      this.handleInput(text, 'voice', { id: userId, name: voiceChannel.members.get(userId)?.displayName }),
+    );
     voice.on('wake', () => this.log('🛑 "Hey Claude": bacaan dihentikan, saya mendengarkan.'));
     voice.on('stt-error', () => this.say('Maaf, suaramu gagal diproses. Coba ulangi.'));
     voice.on('closed', () => {
@@ -180,6 +188,7 @@ export class Assistant {
     if (!keepConversation) {
       // Call closed: stop every ClaudeCall session, foreground and background.
       this.local.reset();
+      this.guests.reset();
       const killed = killAllClaudeCallProcesses();
       console.log(`[bot] Panggilan ditutup: semua sesi ClaudeCall dihentikan (${killed} proses tersisa dimatikan).`);
     }
@@ -187,9 +196,21 @@ export class Assistant {
 
   // ---- input ----------------------------------------------------------
 
-  async handleInput(text, source) {
+  /**
+   * @param {string} text
+   * @param {'voice'|'text'} source
+   * @param {{id?: string, name?: string}} [from] who said it (default: the owner)
+   */
+  async handleInput(text, source, from = {}) {
     const clean = text.trim();
     if (!clean) return;
+    if (from.id && from.id !== config.ownerUserId) {
+      // Guests only get to chat. Commands, approvals and tools are the owner's.
+      const name = from.name || 'Tamu';
+      if (source === 'voice') this.log(`🎙️ **${name}:** ${clean}`);
+      this.guests.send(clean, name);
+      return;
+    }
     if (source === 'voice') this.log(`🎙️ **Kamu:** ${clean}`);
 
     if (this.approval) {

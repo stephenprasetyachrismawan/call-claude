@@ -14,7 +14,7 @@ HP (Discord)  ◀──suara──  Edge TTS (text-to-speech, suara Indonesia)
 ```
 
 - Bot otomatis masuk ke voice channel saat kamu masuk, dan keluar saat kamu keluar.
-- Bot **hanya** mendengar dan menjawab user ID Discord kamu (`OWNER_USER_ID`). Orang lain di channel diabaikan, dan tombol izin hanya bisa ditekan olehmu.
+- **Akses penuh hanya untukmu** (`OWNER_USER_ID`). Teman yang ikut masuk voice channel yang sama juga bisa ngobrol dengan Claude (lewat suara atau ketik di chat), tapi hanya sebagai teman ngobrol: sesi tamu tidak punya tool sama sekali (tidak bisa membuka file, menjalankan perintah, mengakses laptop/server, MCP, atau mengirim pesan). Perintah khusus (stop, reset, ganti model, pindah ke server, jawaban izin, tombol) hanya berlaku untukmu. Jawaban untuk tamu diawali "Untuk <nama>". Pemakaian tamu tetap memakai langgananmu. Bot ikut masuk dan keluar mengikuti kamu, bukan tamu.
 - Transkrip, jawaban lengkap, dan tool yang dipakai Claude juga dikirim sebagai teks ke channel chat. Kamu juga bisa mengetik perintah di sana kalau sedang tidak bisa bicara.
 - Secara default (`PERMISSION_MODE=bypass`) Claude menjalankan **semua** perintah di folder mana pun tanpa bertanya. Kalau mau aksi berisiko diizinkan dulu (lewat suara "ya"/"tidak" atau tombol di chat), isi `PERMISSION_MODE=confirm`.
 - Claude memakai setup Claude Code kamu: skill, plugin, MCP server, `CLAUDE.md`, dan pengaturan di `~/.claude`.

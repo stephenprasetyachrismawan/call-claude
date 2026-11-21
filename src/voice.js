@@ -29,8 +29,8 @@ const WAKE_MAX_S = 6;
 const WAKE_SILENCE_MS = 600;
 
 /**
- * Voice connection to one channel. Listens only to the owner and emits
- * 'utterance' with the transcribed text. speak() reads text aloud.
+ * Voice connection to one channel. Listens to everyone in it (not bots) and
+ * emits 'utterance' (text, userId) with the transcribed text. speak() reads text aloud.
  * Speech is strict: every queued answer is read to the end, in order. While
  * the bot speaks, the owner's voice is not taken as input, it is only checked
  * for the wake word "hey Claude": that stops all speech right away (emits
@@ -48,7 +48,7 @@ export class VoiceLink extends EventEmitter {
       behaviors: { noSubscriber: NoSubscriberBehavior.Play, maxMissedFrames: 500 },
     });
     this.player.on('error', (err) => console.error('[voice] player error:', err.message));
-    this.recording = false;
+    this.recording = new Set(); // user ids being recorded right now
     this.speechChain = Promise.resolve();
     this.pendingSpeech = 0; // queued or playing answers
     this.speechEndedAt = 0;
@@ -81,7 +81,11 @@ export class VoiceLink extends EventEmitter {
     await entersState(this.connection, VoiceConnectionStatus.Ready, 20_000);
     this.connection.subscribe(this.player);
     this.connection.receiver.speaking.on('start', (userId) => {
-      if (userId === config.ownerUserId) this.#listen();
+      // Everyone in the channel can talk to Claude (except bots); the
+      // assistant decides what each person may do.
+      const member = this.channel.guild.members.cache.get(userId);
+      if (member?.user.bot || userId === this.channel.client.user?.id) return;
+      this.#listen(userId);
     });
   }
 
@@ -179,14 +183,14 @@ export class VoiceLink extends EventEmitter {
     });
   }
 
-  #listen() {
-    if (this.recording || !this.connection) return;
+  #listen(userId) {
+    if (this.recording.has(userId) || !this.connection) return;
     if (this.closed) return;
     // While speaking, only listen for the wake word (short clips).
     const wakeOnly = this.speaking;
-    this.recording = true;
+    this.recording.add(userId);
 
-    const opus = this.connection.receiver.subscribe(config.ownerUserId, {
+    const opus = this.connection.receiver.subscribe(userId, {
       end: { behavior: EndBehaviorType.AfterSilence, duration: wakeOnly ? WAKE_SILENCE_MS : config.silenceMs },
     });
     const decoder = new prism.opus.Decoder({ rate: 48000, channels: 2, frameSize: 960 });
@@ -195,10 +199,10 @@ export class VoiceLink extends EventEmitter {
     const maxBytes = (wakeOnly ? WAKE_MAX_S : MAX_UTTERANCE_S) * 48000 * 2 * 2;
 
     const finish = () => {
-      if (!this.recording) return;
-      this.recording = false;
+      if (!this.recording.has(userId)) return;
+      this.recording.delete(userId);
       const pcm = Buffer.concat(chunks);
-      this.#handleAudio(pcm, wakeOnly).catch((err) => {
+      this.#handleAudio(pcm, wakeOnly, userId).catch((err) => {
         console.error('[voice] STT error:', err.message);
         this.emit('stt-error', err);
       });
@@ -216,7 +220,7 @@ export class VoiceLink extends EventEmitter {
     opus.pipe(decoder);
   }
 
-  async #handleAudio(pcm, wakeOnly) {
+  async #handleAudio(pcm, wakeOnly, userId) {
     if (pcmDurationSeconds(pcm) < MIN_UTTERANCE_S) return;
     const mono = toMono16k(pcm);
     if (rms(mono) < MIN_LOUDNESS) return;
@@ -227,14 +231,14 @@ export class VoiceLink extends EventEmitter {
       if (!wake) return; // no "hey Claude": let the bot keep talking
       console.log('[voice] Wake word, bacaan dihentikan');
       this.interruptSpeech();
-      this.emit('wake');
-      if (wake.rest) this.emit('utterance', wake.rest);
+      this.emit('wake', userId);
+      if (wake.rest) this.emit('utterance', wake.rest, userId);
       return;
     }
     if (wake) {
-      if (wake.rest) this.emit('utterance', wake.rest);
+      if (wake.rest) this.emit('utterance', wake.rest, userId);
       return; // a bare "hey Claude" when nothing is playing needs no answer
     }
-    this.emit('utterance', text);
+    this.emit('utterance', text, userId);
   }
 }

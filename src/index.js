@@ -68,13 +68,17 @@ client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
   if (newState.id === client.user.id && !newState.channel) assistant.disconnect({ keepConversation: true });
 });
 
-// Typed messages from the owner in the bot's text channel go to Claude too.
+// Typed messages in the bot's text channel go to Claude too.
 client.on(Events.MessageCreate, async (message) => {
-  if (message.author.bot || !isOwner(message.author.id)) return;
-  if (message.guildId !== config.guildId) return;
+  if (message.author.bot || message.guildId !== config.guildId) return;
   const channelId = assistant.textChannel?.id ?? config.textChannelId;
   if (!channelId || message.channelId !== channelId) return;
-  await assistant.handleInput(message.content, 'text');
+  // The owner gets full access; anyone else in the channel can only chat.
+  if (!isOwner(message.author.id) && !assistant.inCall) return;
+  await assistant.handleInput(message.content, 'text', {
+    id: message.author.id,
+    name: message.member?.displayName ?? message.author.username,
+  });
 });
 
 // Approve / deny buttons. Only the owner can press them.
